@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Remote days calendar</title>
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+<div class="app">
+  <div class="topbar">
+    <div class="title-wrap">
+      <h1>Remote days calendar</h1>
+      <p>Balanced monthly remote-day rotation with editable rules.</p>
+    </div>
+    <div class="actions">
+      <button class="btn" id="todayBtn">Today</button>
+      <button class="btn" id="settingsBtn">Settings</button>
+      <button class="btn primary" id="regenerateBtn">Randomize month</button>
+    </div>
+  </div>
+
+  <div class="toolbar">
+    <div class="month-nav">
+      <button class="btn" id="prevMonthBtn" aria-label="Previous month">←</button>
+      <div class="month-label" id="monthLabel"></div>
+      <button class="btn" id="nextMonthBtn" aria-label="Next month">→</button>
+    </div>
+    <div class="summary" id="summary"></div>
+  </div>
+
+  <div class="legend" id="legend"></div>
+
+  <div class="calendar-shell">
+    <div class="weekdays">
+      <div class="weekday">Mon</div>
+      <div class="weekday">Tue</div>
+      <div class="weekday">Wed</div>
+      <div class="weekday">Thu</div>
+      <div class="weekday">Fri</div>
+      <div class="weekday">Sat</div>
+      <div class="weekday">Sun</div>
+    </div>
+    <div class="calendar-grid" id="calendarGrid"></div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="settingsModal">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+    <div class="modal-header">
+      <h2 id="settingsTitle">Settings</h2>
+      <button class="btn" id="closeSettingsBtn">Close</button>
+    </div>
+    <div class="modal-body">
+      <div class="settings-grid">
+        <div class="field">
+          <label for="daysPerPersonInput">Remote days per person / month</label>
+          <input class="input" id="daysPerPersonInput" type="number" min="1" max="20">
+        </div>
+
+        <div class="field">
+          <label for="maxPerDayInput">Maximum people per remote day</label>
+          <input class="input" id="maxPerDayInput" type="number" min="1" max="20">
+        </div>
+
+        <div class="field">
+          <label for="maxPeoplePerWeekInput">Maximum distinct people per week</label>
+          <input class="input" id="maxPeoplePerWeekInput" type="number" min="1" max="20">
+        </div>
+
+        <div class="field full">
+          <span class="section-label">Allowed weekdays</span>
+          <div class="weekday-options" id="weekdayOptions"></div>
+        </div>
+
+        <div class="field full">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+            <span class="section-label">People</span>
+            <button class="btn" id="addPersonBtn">Add person</button>
+          </div>
+          <div class="people-editor" id="peopleEditor"></div>
+        </div>
+      </div>
+
+      <div class="settings-note">
+        Saving settings clears stored schedules and generates a fresh schedule. Each person can receive at most one remote day per calendar week, while still receiving the configured monthly total.
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" id="cancelSettingsBtn">Cancel</button>
+      <button class="btn primary" id="saveSettingsBtn">Save settings</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="js/app.js"></script>
+</body>
+</html>
