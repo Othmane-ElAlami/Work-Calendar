@@ -1,5 +1,7 @@
 const STORAGE_SETTINGS = "remoteCalendarSettingsV1";
 const STORAGE_SCHEDULES = "remoteCalendarSchedulesV1";
+const BACKUP_VERSION = 1;
+const PREFERRED_WEEKDAYS = [2, 3, 4];
 
 const defaultSettings = {
   people: ["Alae", "Othmane", "Omar", "Zakaria", "Zouhair", "Hamza", "Yassine"],
@@ -40,6 +42,7 @@ const maxPeoplePerWeekInput = document.getElementById("maxPeoplePerWeekInput");
 const weekdayOptions = document.getElementById("weekdayOptions");
 const peopleEditor = document.getElementById("peopleEditor");
 const toast = document.getElementById("toast");
+const importFileInput = document.getElementById("importFileInput");
 
 function loadSettings() {
   try {
@@ -122,6 +125,9 @@ function getEligibleDates(year, month) {
 }
 
 function scheduleCapacityCheck(year, month) {
+  const eligibleDates = getEligibleDates(year, month);
+  const assignmentsNeeded = settings.people.length * settings.daysPerPerson;
+
   if (!settings.people.length) {
     return { ok: false, reason: "Add at least one person." };
   }
@@ -130,61 +136,57 @@ function scheduleCapacityCheck(year, month) {
     return { ok: false, reason: "Select at least one allowed weekday." };
   }
 
-  const eligibleDates = getEligibleDates(year, month);
-  const assignmentsNeeded = settings.people.length * settings.daysPerPerson;
-  const totalCapacity = eligibleDates.length * settings.maxPerDay;
+  const weeks = {};
 
-  if (eligibleDates.length < settings.daysPerPerson) {
-    return {
-      ok: false,
-      reason: `Impossible configuration: Each person needs ${settings.daysPerPerson} remote days, but this month only has ${eligibleDates.length} eligible dates.`
-    };
-  }
-
-  const weeksMap = {};
   for (const date of eligibleDates) {
-    const wKey = weekKeyFromIso(date);
-    if (!weeksMap[wKey]) {
-      weeksMap[wKey] = [];
-    }
-    weeksMap[wKey].push(date);
-  }
-  const numWeeks = Object.keys(weeksMap).length;
+    const weekKey = weekKeyFromIso(date);
 
-  if (numWeeks < settings.daysPerPerson) {
+    if (!weeks[weekKey]) {
+      weeks[weekKey] = [];
+    }
+
+    weeks[weekKey].push(date);
+  }
+
+  const usableWeeks = Object.keys(weeks).length;
+
+  if (usableWeeks < settings.daysPerPerson) {
     return {
       ok: false,
-      reason: `Impossible configuration: Each person needs ${settings.daysPerPerson} remote days, but there are only ${numWeeks} weeks with eligible dates (maximum 1 day per person per week).`
+      reason: `Impossible configuration: each person needs ${settings.daysPerPerson} remote days in different calendar weeks, but this month only has ${usableWeeks} usable weeks.`
     };
   }
 
   const maxWeeklyPeople = Math.min(settings.maxPeoplePerWeek, settings.people.length);
-  const maxAssignmentsFromWeeklyLimit = numWeeks * maxWeeklyPeople;
-  if (maxAssignmentsFromWeeklyLimit < assignmentsNeeded) {
-    const minWeeklyNeeded = Math.ceil(assignmentsNeeded / numWeeks);
-    return {
-      ok: false,
-      reason: `Impossible configuration: ${assignmentsNeeded} assignments are required, but the weekly limits only allow ${maxAssignmentsFromWeeklyLimit}. Increase Maximum distinct people per week to at least ${minWeeklyNeeded}.`
-    };
-  }
+
+  const totalCapacity = Object.values(weeks).reduce((sum, dates) => {
+    const dateCapacity = dates.length * settings.maxPerDay;
+    return sum + Math.min(dateCapacity, maxWeeklyPeople);
+  }, 0);
 
   if (totalCapacity < assignmentsNeeded) {
-    const minDailyNeeded = Math.ceil(assignmentsNeeded / eligibleDates.length);
-    return {
-      ok: false,
-      reason: `Impossible configuration: ${assignmentsNeeded} assignments are required, but daily capacity only allows ${totalCapacity}. Increase Maximum people per remote day to at least ${minDailyNeeded}.`
-    };
-  }
+    let suggestedWeeklyLimit = settings.maxPeoplePerWeek;
 
-  let totalCombinedCapacity = 0;
-  for (const wKey in weeksMap) {
-    const weekDailyCapacity = weeksMap[wKey].length * settings.maxPerDay;
-    totalCombinedCapacity += Math.min(weekDailyCapacity, maxWeeklyPeople);
-  }
-  if (totalCombinedCapacity < assignmentsNeeded) {
+    while (suggestedWeeklyLimit < settings.people.length) {
+      suggestedWeeklyLimit++;
+
+      const possible = Object.values(weeks).reduce((sum, dates) => {
+        const dateCapacity = dates.length * settings.maxPerDay;
+        return sum + Math.min(dateCapacity, suggestedWeeklyLimit, settings.people.length);
+      }, 0);
+
+      if (possible >= assignmentsNeeded) {
+        break;
+      }
+    }
+
+    const suggestion = suggestedWeeklyLimit <= settings.people.length
+      ? ` Increase Maximum distinct people per week to at least ${suggestedWeeklyLimit}, or increase another capacity setting.`
+      : " Increase the per-day limit or allow more weekdays.";
+
     return {
       ok: false,
-      reason: `Impossible configuration: ${assignmentsNeeded} assignments are required, but the combined weekly and daily limits only allow ${totalCombinedCapacity}. Increase Maximum distinct people per week or Maximum people per remote day.`
+      reason: `Impossible configuration: ${assignmentsNeeded} assignments are required, but the current weekly and daily limits allow at most ${totalCapacity}.${suggestion}`
     };
   }
 
@@ -200,7 +202,7 @@ function generateSchedule(year, month) {
   const eligibleDates = getEligibleDates(year, month);
   const maxWeeklyPeople = Math.min(settings.maxPeoplePerWeek, settings.people.length);
 
-  for (let attempt = 0; attempt < 2000; attempt++) {
+  for (let attempt = 0; attempt < 4000; attempt++) {
     const schedule = {};
     const dateLoad = {};
     const personDates = {};
@@ -209,7 +211,9 @@ function generateSchedule(year, month) {
     for (const date of eligibleDates) {
       schedule[date] = [];
       dateLoad[date] = 0;
+
       const weekKey = weekKeyFromIso(date);
+
       if (!weeklyPeople[weekKey]) {
         weeklyPeople[weekKey] = new Set();
       }
@@ -223,44 +227,54 @@ function generateSchedule(year, month) {
 
     for (const person of shuffle(settings.people)) {
       for (let slot = 0; slot < settings.daysPerPerson; slot++) {
-        const candidates = eligibleDates
-          .filter(date => {
-            if (dateLoad[date] >= settings.maxPerDay) {
-              return false;
-            }
+        const available = eligibleDates.filter(date => {
+          if (dateLoad[date] >= settings.maxPerDay) {
+            return false;
+          }
 
-            if (personDates[person].has(date)) {
-              return false;
-            }
+          if (personDates[person].has(date)) {
+            return false;
+          }
 
-            const weekKey = weekKeyFromIso(date);
-            const peopleThisWeek = weeklyPeople[weekKey];
-            const personAlreadyInWeek = peopleThisWeek.has(person);
+          const weekKey = weekKeyFromIso(date);
+          const peopleThisWeek = weeklyPeople[weekKey];
 
-            if (personAlreadyInWeek) {
-              return false;
-            }
+          if (peopleThisWeek.has(person)) {
+            return false;
+          }
 
-            if (peopleThisWeek.size >= maxWeeklyPeople) {
-              return false;
-            }
+          if (peopleThisWeek.size >= maxWeeklyPeople) {
+            return false;
+          }
 
-            return true;
-          })
+          return true;
+        });
+
+        if (!available.length) {
+          failed = true;
+          break;
+        }
+
+        const preferred = available.filter(date => {
+          const [dateYear, dateMonth, dateDay] = date.split("-").map(Number);
+          const weekday = toMondayIndex(new Date(dateYear, dateMonth - 1, dateDay).getDay());
+          return PREFERRED_WEEKDAYS.includes(weekday);
+        });
+
+        const candidatePool = preferred.length ? preferred : available;
+
+        const candidates = candidatePool
           .map(date => ({
             date,
             load: dateLoad[date],
+            weekLoad: weeklyPeople[weekKeyFromIso(date)].size,
             noise: Math.random()
           }))
           .sort((a, b) =>
             a.load - b.load ||
+            a.weekLoad - b.weekLoad ||
             a.noise - b.noise
           );
-
-        if (!candidates.length) {
-          failed = true;
-          break;
-        }
 
         const minLoad = candidates[0].load;
         const balancedPool = candidates.filter(item => item.load <= minLoad + 1);
@@ -282,11 +296,12 @@ function generateSchedule(year, month) {
       for (const date of Object.keys(schedule)) {
         schedule[date] = shuffle(schedule[date]);
       }
+
       return schedule;
     }
   }
 
-  throw new Error("Could not generate a valid schedule with the current rules. Increase the per-day or per-week limits, or allow more weekdays.");
+  throw new Error("Could not generate a valid schedule after repeated attempts. Try increasing a capacity limit or allowing another weekday.");
 }
 
 function ensureCurrentSchedule() {
@@ -553,6 +568,148 @@ function addPerson() {
   });
 }
 
+
+function exportCalendarData() {
+  const payload = {
+    version: BACKUP_VERSION,
+    exportedAt: new Date().toISOString(),
+    settings,
+    schedules
+  };
+
+  const json = JSON.stringify(payload, null, 2);
+  const blob = new Blob([json], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  const stamp = new Date().toISOString().slice(0, 10);
+
+  link.href = url;
+  link.download = `work-calendar-backup-${stamp}.json`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+
+  showToast("Calendar data exported.");
+}
+
+function validateImportedData(data) {
+  if (!data || typeof data !== "object") {
+    throw new Error("Invalid backup file.");
+  }
+
+  if (!data.settings || typeof data.settings !== "object") {
+    throw new Error("The backup does not contain calendar settings.");
+  }
+
+  if (!data.schedules || typeof data.schedules !== "object" || Array.isArray(data.schedules)) {
+    throw new Error("The backup does not contain valid schedules.");
+  }
+
+  const importedSettings = data.settings;
+
+  if (!Array.isArray(importedSettings.people) || !importedSettings.people.length) {
+    throw new Error("The backup contains an invalid people list.");
+  }
+
+  const people = importedSettings.people
+    .map(person => String(person).trim())
+    .filter(Boolean);
+
+  const normalizedNames = people.map(person => person.toLowerCase());
+
+  if (people.length !== importedSettings.people.length || new Set(normalizedNames).size !== people.length) {
+    throw new Error("The backup contains empty or duplicate names.");
+  }
+
+  if (!Array.isArray(importedSettings.allowedWeekdays) || !importedSettings.allowedWeekdays.length) {
+    throw new Error("The backup contains invalid weekday settings.");
+  }
+
+  const allowedWeekdays = importedSettings.allowedWeekdays.map(Number);
+
+  if (allowedWeekdays.some(day => !Number.isInteger(day) || day < 1 || day > 5)) {
+    throw new Error("The backup contains unsupported weekdays.");
+  }
+
+  const daysPerPerson = Number(importedSettings.daysPerPerson);
+  const maxPerDay = Number(importedSettings.maxPerDay);
+  const maxPeoplePerWeek = Number(importedSettings.maxPeoplePerWeek);
+
+  if (!Number.isInteger(daysPerPerson) || daysPerPerson < 1) {
+    throw new Error("The backup contains an invalid monthly remote-day count.");
+  }
+
+  if (!Number.isInteger(maxPerDay) || maxPerDay < 1) {
+    throw new Error("The backup contains an invalid daily limit.");
+  }
+
+  if (!Number.isInteger(maxPeoplePerWeek) || maxPeoplePerWeek < 1) {
+    throw new Error("The backup contains an invalid weekly limit.");
+  }
+
+  const personSet = new Set(people);
+
+  for (const [month, schedule] of Object.entries(data.schedules)) {
+    if (!/^\d{4}-\d{2}$/.test(month) || !schedule || typeof schedule !== "object" || Array.isArray(schedule)) {
+      throw new Error(`The backup contains an invalid schedule entry: ${month}.`);
+    }
+
+    for (const [date, names] of Object.entries(schedule)) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Array.isArray(names)) {
+        throw new Error(`The backup contains invalid data for ${date}.`);
+      }
+
+      if (names.some(name => !personSet.has(name))) {
+        throw new Error(`The backup references an unknown person on ${date}.`);
+      }
+    }
+  }
+
+  return {
+    settings: {
+      people,
+      daysPerPerson,
+      maxPerDay,
+      maxPeoplePerWeek,
+      allowedWeekdays: [...new Set(allowedWeekdays)]
+    },
+    schedules: data.schedules
+  };
+}
+
+async function importCalendarData(file) {
+  if (!file) {
+    return;
+  }
+
+  try {
+    const text = await file.text();
+    const parsed = JSON.parse(text);
+    const imported = validateImportedData(parsed);
+
+    const confirmed = window.confirm(
+      "Import this calendar backup? This will replace the schedules and settings currently saved in this browser."
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    settings = imported.settings;
+    schedules = imported.schedules;
+
+    saveSettingsState();
+    saveSchedulesState();
+    renderCalendar();
+    showToast("Calendar data imported.");
+  } catch (error) {
+    showToast(`Import failed: ${error.message}`, true);
+  } finally {
+    importFileInput.value = "";
+  }
+}
+
 function showToast(message, error = false) {
   toast.textContent = message;
   toast.classList.toggle("error", error);
@@ -590,6 +747,9 @@ document.getElementById("todayBtn").addEventListener("click", () => {
 });
 
 document.getElementById("regenerateBtn").addEventListener("click", regenerateCurrentMonth);
+document.getElementById("exportBtn").addEventListener("click", exportCalendarData);
+document.getElementById("importBtn").addEventListener("click", () => importFileInput.click());
+importFileInput.addEventListener("change", event => importCalendarData(event.target.files[0]));
 document.getElementById("settingsBtn").addEventListener("click", openSettings);
 document.getElementById("closeSettingsBtn").addEventListener("click", closeSettings);
 document.getElementById("cancelSettingsBtn").addEventListener("click", closeSettings);

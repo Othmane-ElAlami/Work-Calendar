@@ -1,10 +1,10 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Remote days calendar</title>
-  <link rel="stylesheet" href="css/styles.css">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Remote days calendar</title>
+<link rel="stylesheet" href="css/styles.css">
 </head>
 <body>
 <div class="app">
@@ -15,8 +15,11 @@
     </div>
     <div class="actions">
       <button class="btn" id="todayBtn">Today</button>
+      <button class="btn" id="exportBtn">Export</button>
+      <button class="btn" id="importBtn">Import</button>
       <button class="btn" id="settingsBtn">Settings</button>
       <button class="btn primary" id="regenerateBtn">Randomize month</button>
+      <input id="importFileInput" type="file" accept=".json,application/json" hidden>
     </div>
   </div>
 
@@ -83,7 +86,7 @@
       </div>
 
       <div class="settings-note">
-        Saving settings clears stored schedules and generates a fresh schedule. Each person can receive at most one remote day per calendar week, while still receiving the configured monthly total.
+        Saving settings clears stored schedules and generates a fresh schedule. Each person can receive at most one remote day per calendar week. Tuesday, Wednesday, and Thursday are always preferred; if Monday or Friday are enabled, they are used only as fallback days when preferred slots are unavailable.
       </div>
     </div>
     <div class="modal-footer">
