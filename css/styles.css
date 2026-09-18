@@ -229,6 +229,10 @@ button {
   box-shadow: inset 0 0 0 1px rgba(169, 112, 255, 0.65);
 }
 
+.day.constrained .day-state {
+  color: rgba(169, 112, 255, 0.55);
+}
+
 .day-number {
   display: flex;
   align-items: center;
