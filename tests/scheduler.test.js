@@ -1,14 +1,16 @@
 const {
+  ROTATION_ORDER,
+  ANCHOR_DATE,
+  isoDate,
+  toMondayIndex,
   getWeekKey,
   getPreviousWeekKey,
   getNextWeekKey,
-  getExternalWeekAssignments,
-  calculateFairness,
-  solveSchedule,
-  validateSchedulesGlobal
+  getEffectiveHolidays,
+  getStaticHolidays,
+  computeSchedule,
+  validateImportedData
 } = require("../js/app.js");
-
-const defaultPeople = ["Alae", "Othmane", "Omar", "Zakaria", "Zouhair", "Hamza", "Yassine"];
 
 let passedCount = 0;
 
@@ -23,190 +25,153 @@ function runTest(testName, fn) {
   }
 }
 
-runTest("Test 1: One person per day", () => {
-  const sched = solveSchedule(2026, 8, defaultPeople, 2, {}, {}, {});
-  for (const [date, names] of Object.entries(sched)) {
-    if (names.length > 1) throw new Error(`Date ${date} has ${names.length} people`);
+runTest("Test 1: Rotation order preservation", () => {
+  const res = computeSchedule("2026-10-31", ROTATION_ORDER, ANCHOR_DATE, {});
+  const dates = Object.keys(res.assignments).sort();
+  const first7 = dates.slice(0, 7).map(d => res.assignments[d]);
+  const first14 = dates.slice(0, 14).map(d => res.assignments[d]);
+
+  const set7 = new Set(first7);
+  if (set7.size !== 7) throw new Error("Expected all 7 distinct people in first 7 slots");
+  for (let i = 0; i < 7; i++) {
+    if (first7[i] !== ROTATION_ORDER[i]) throw new Error(`Mismatch at index ${i}: expected ${ROTATION_ORDER[i]}, got ${first7[i]}`);
+  }
+
+  const counts14 = {};
+  for (const p of first14) counts14[p] = (counts14[p] || 0) + 1;
+  for (const p of ROTATION_ORDER) {
+    if (counts14[p] !== 2) throw new Error(`Expected exactly 2 turns for ${p}, got ${counts14[p]}`);
   }
 });
 
-runTest("Test 2: Allowed weekdays (Tue/Wed/Thu only)", () => {
-  const sched = solveSchedule(2026, 8, defaultPeople, 2, {}, {}, {});
-  for (const [date, names] of Object.entries(sched)) {
-    if (names.length > 0) {
-      const [y, m, d] = date.split("-").map(Number);
-      const jsDay = new Date(y, m - 1, d).getDay();
-      const wd = jsDay === 0 ? 7 : jsDay;
-      if (wd < 2 || wd > 4) throw new Error(`Date ${date} has weekday ${wd}`);
-    }
+runTest("Test 2: Month boundary continuity", () => {
+  const res = computeSchedule("2026-10-31", ROTATION_ORDER, ANCHOR_DATE, {});
+  const dates = Object.keys(res.assignments).sort();
+  const sepDates = dates.filter(d => d.startsWith("2026-09"));
+  const octDates = dates.filter(d => d.startsWith("2026-10"));
+
+  const lastSepDate = sepDates[sepDates.length - 1];
+  const firstOctDate = octDates[0];
+
+  const lastSepPerson = res.assignments[lastSepDate];
+  const firstOctPerson = res.assignments[firstOctDate];
+
+  const lastSepIdx = ROTATION_ORDER.indexOf(lastSepPerson);
+  const expectedNextIdx = (lastSepIdx + 1) % ROTATION_ORDER.length;
+  if (ROTATION_ORDER[expectedNextIdx] !== firstOctPerson) {
+    throw new Error(`Month reset detected: Sep ended with ${lastSepPerson}, Oct started with ${firstOctPerson}`);
   }
 });
 
-runTest("Test 3: Maximum one per week", () => {
-  const sched = solveSchedule(2026, 8, defaultPeople, 2, {}, {}, {});
-  const perWeek = {};
-  for (const [date, names] of Object.entries(sched)) {
-    if (!names.length) continue;
-    const p = names[0];
-    const wk = getWeekKey(date);
-    if (!perWeek[p]) perWeek[p] = new Set();
-    if (perWeek[p].has(wk)) throw new Error(`${p} assigned twice in week ${wk}`);
-    perWeek[p].add(wk);
+runTest("Test 3: Year boundary continuity", () => {
+  const res = computeSchedule("2027-01-31", ROTATION_ORDER, ANCHOR_DATE, {});
+  const dates = Object.keys(res.assignments).sort();
+  const decDates = dates.filter(d => d.startsWith("2026-12"));
+  const janDates = dates.filter(d => d.startsWith("2027-01"));
+
+  const lastDecDate = decDates[decDates.length - 1];
+  const firstJanDate = janDates[0];
+
+  const lastDecPerson = res.assignments[lastDecDate];
+  const firstJanPerson = res.assignments[firstJanDate];
+
+  const lastDecIdx = ROTATION_ORDER.indexOf(lastDecPerson);
+  const expectedNextIdx = (lastDecIdx + 1) % ROTATION_ORDER.length;
+  if (ROTATION_ORDER[expectedNextIdx] !== firstJanPerson) {
+    throw new Error(`Year reset detected: Dec ended with ${lastDecPerson}, Jan started with ${firstJanPerson}`);
   }
 });
 
-runTest("Test 4: No consecutive weeks", () => {
-  const sched = solveSchedule(2026, 8, defaultPeople, 2, {}, {}, {});
-  const perWeek = {};
-  for (const [date, names] of Object.entries(sched)) {
-    if (!names.length) continue;
-    const p = names[0];
-    const wk = getWeekKey(date);
-    if (!perWeek[p]) perWeek[p] = [];
-    perWeek[p].push(wk);
+runTest("Test 4: Holiday skipping and turn retention", () => {
+  const wedDate = "2026-09-23";
+  const thuDate = "2026-09-24";
+  const holidays = { [wedDate]: "Test Holiday" };
+  const res = computeSchedule("2026-09-30", ROTATION_ORDER, ANCHOR_DATE, holidays);
+
+  if (res.assignments[wedDate]) throw new Error("Person assigned on holiday date");
+  if (!res.holidays[wedDate]) throw new Error("Holiday not registered");
+  if (res.assignments[thuDate] !== ROTATION_ORDER[1]) {
+    throw new Error(`Expected ${ROTATION_ORDER[1]} to work on Thursday after holiday, got ${res.assignments[thuDate]}`);
   }
-  for (const [p, wks] of Object.entries(perWeek)) {
-    const sorted = [...wks].sort();
-    for (let i = 0; i < sorted.length - 1; i++) {
-      if (getNextWeekKey(sorted[i]) === sorted[i + 1]) {
-        throw new Error(`${p} in consecutive weeks ${sorted[i]} and ${sorted[i + 1]}`);
+});
+
+runTest("Test 5: Capacity constraint (max 1 person per day)", () => {
+  const res = computeSchedule("2027-09-21", ROTATION_ORDER, ANCHOR_DATE, {});
+  for (const [d, p] of Object.entries(res.assignments)) {
+    if (typeof p !== "string" || !p.trim().length) throw new Error(`Invalid assignment on ${d}`);
+  }
+});
+
+runTest("Test 6: Allowed days constraint (Tue/Wed/Thu only)", () => {
+  const res = computeSchedule("2027-09-21", ROTATION_ORDER, ANCHOR_DATE, {});
+  for (const d of Object.keys(res.assignments)) {
+    const [y, m, day] = d.split("-").map(Number);
+    const wd = toMondayIndex(new Date(y, m - 1, day).getDay());
+    if (wd < 2 || wd > 4) throw new Error(`Assignment on non-remote weekday ${d} (weekday index ${wd})`);
+  }
+});
+
+runTest("Test 7: Consecutive weeks constraint", () => {
+  const res = computeSchedule("2027-09-21", ROTATION_ORDER, ANCHOR_DATE, {});
+  const personWeeks = {};
+  for (const [d, p] of Object.entries(res.assignments)) {
+    const wk = getWeekKey(d);
+    if (!personWeeks[p]) personWeeks[p] = [];
+    personWeeks[p].push(wk);
+  }
+  for (const [p, wks] of Object.entries(personWeeks)) {
+    const unique = [...new Set(wks)].sort();
+    if (unique.length !== wks.length) throw new Error(`${p} assigned multiple times in the same week`);
+    for (let i = 0; i < unique.length - 1; i++) {
+      if (getNextWeekKey(unique[i]) === unique[i + 1]) {
+        throw new Error(`${p} assigned in consecutive weeks ${unique[i]} and ${unique[i + 1]}`);
       }
     }
   }
 });
 
-runTest("Test 5: Month boundary (Sep 2026 -> Oct 2026)", () => {
-  const scheds = {};
-  const extSep = getExternalWeekAssignments(scheds, "2026-09");
-  const fairSep = calculateFairness(defaultPeople, scheds, "2026-09", 2);
-  scheds["2026-09"] = solveSchedule(2026, 8, defaultPeople, 2, extSep, fairSep.cumulativePrior, fairSep.fairnessDebts);
+runTest("Test 8: Deterministic generation", () => {
+  const res1 = computeSchedule("2027-03-31", ROTATION_ORDER, ANCHOR_DATE, {});
+  const res2 = computeSchedule("2027-03-31", ROTATION_ORDER, ANCHOR_DATE, {});
+  if (JSON.stringify(res1) !== JSON.stringify(res2)) throw new Error("Repeated generation is not deterministic");
 
-  const extOct = getExternalWeekAssignments(scheds, "2026-10");
-  const fairOct = calculateFairness(defaultPeople, scheds, "2026-10", 2);
-  scheds["2026-10"] = solveSchedule(2026, 9, defaultPeople, 2, extOct, fairOct.cumulativePrior, fairOct.fairnessDebts);
-
-  const check = validateSchedulesGlobal(scheds, defaultPeople);
-  if (!check.valid) throw new Error(check.error);
+  const clonedOrder = [...ROTATION_ORDER];
+  const res3 = computeSchedule("2027-03-31", clonedOrder, ANCHOR_DATE, {});
+  if (JSON.stringify(res1) !== JSON.stringify(res3)) throw new Error("Generation with cloned array is not deterministic");
 });
 
-runTest("Test 6: Year boundary (Dec 2026 -> Jan 2027)", () => {
-  const scheds = {};
-  const extDec = getExternalWeekAssignments(scheds, "2026-12");
-  const fairDec = calculateFairness(defaultPeople, scheds, "2026-12", 2);
-  scheds["2026-12"] = solveSchedule(2026, 11, defaultPeople, 2, extDec, fairDec.cumulativePrior, fairDec.fairnessDebts);
+runTest("Test 9: API outage and cached holiday fallback", () => {
+  const cachedHolidays = [{ date: "2026-11-18", name: "Independence Day" }];
+  const effectiveCached = getEffectiveHolidays(cachedHolidays, []);
+  const resWithCache = computeSchedule("2026-11-30", ROTATION_ORDER, ANCHOR_DATE, effectiveCached);
+  if (!resWithCache.holidays["2026-11-18"]) throw new Error("Cached holiday not recognized");
 
-  const extJan = getExternalWeekAssignments(scheds, "2027-01");
-  const fairJan = calculateFairness(defaultPeople, scheds, "2027-01", 2);
-  scheds["2027-01"] = solveSchedule(2027, 0, defaultPeople, 2, extJan, fairJan.cumulativePrior, fairJan.fairnessDebts);
-
-  const check = validateSchedulesGlobal(scheds, defaultPeople);
-  if (!check.valid) throw new Error(check.error);
+  const staticFallback = getStaticHolidays(2026);
+  if (!Array.isArray(staticFallback) || staticFallback.length === 0) throw new Error("Static fallback empty");
+  const fallbackEffective = getEffectiveHolidays(staticFallback, []);
+  if (!fallbackEffective["2026-11-18"]) throw new Error("Static fallback does not include Independence Day");
 });
 
-runTest("Test 7: Generation order independence", () => {
-  const schedsA = {};
-  schedsA["2026-09"] = solveSchedule(2026, 8, defaultPeople, 2, {}, {}, {});
-  const extOctA = getExternalWeekAssignments(schedsA, "2026-10");
-  const fairOctA = calculateFairness(defaultPeople, schedsA, "2026-10", 2);
-  schedsA["2026-10"] = solveSchedule(2026, 9, defaultPeople, 2, extOctA, fairOctA.cumulativePrior, fairOctA.fairnessDebts);
-  const checkA = validateSchedulesGlobal(schedsA, defaultPeople);
-  if (!checkA.valid) throw new Error(checkA.error);
+runTest("Test 10: Holiday manual overrides", () => {
+  const original = computeSchedule("2026-10-15", ROTATION_ORDER, ANCHOR_DATE, {});
+  const targetDate = "2026-09-29";
+  const originalPerson = original.assignments[targetDate];
 
-  const schedsB = {};
-  schedsB["2026-10"] = solveSchedule(2026, 9, defaultPeople, 2, {}, {}, {});
-  const extSepB = getExternalWeekAssignments(schedsB, "2026-09");
-  const fairSepB = calculateFairness(defaultPeople, schedsB, "2026-09", 2);
-  schedsB["2026-09"] = solveSchedule(2026, 8, defaultPeople, 2, extSepB, fairSepB.cumulativePrior, fairSepB.fairnessDebts);
-  const checkB = validateSchedulesGlobal(schedsB, defaultPeople);
-  if (!checkB.valid) throw new Error(checkB.error);
-});
+  const overrides = [{ date: targetDate, name: "Special Offsite", isHoliday: true }];
+  const effective = getEffectiveHolidays([], overrides);
+  const updated = computeSchedule("2026-10-15", ROTATION_ORDER, ANCHOR_DATE, effective);
 
-runTest("Test 8: Monthly scarcity handled gracefully", () => {
-  const sched = solveSchedule(2026, 1, defaultPeople, 2, {}, {}, {});
-  let count = 0;
-  for (const names of Object.values(sched)) count += names.length;
-  if (count !== 12) throw new Error(`Expected 12 assignments in Feb 2026, got ${count}`);
-});
+  if (updated.assignments[targetDate]) throw new Error("Override date still assigned to person");
+  if (!updated.holidays[targetDate]) throw new Error("Holiday override not recorded in holidays map");
 
-runTest("Test 9: Fairness simulation across multiple months", () => {
-  const multiScheds = {};
-  for (let m = 0; m < 6; m++) {
-    const mKey = `2026-${String(m + 1).padStart(2, "0")}`;
-    const ext = getExternalWeekAssignments(multiScheds, mKey);
-    const fair = calculateFairness(defaultPeople, multiScheds, mKey, 2);
-    multiScheds[mKey] = solveSchedule(2026, m, defaultPeople, 2, ext, fair.cumulativePrior, fair.fairnessDebts);
+  const nextSlot = "2026-09-30";
+  if (updated.assignments[nextSlot] !== originalPerson) {
+    throw new Error(`Expected ${originalPerson} on ${nextSlot}, got ${updated.assignments[nextSlot]}`);
   }
-  const totals = {};
-  for (const p of defaultPeople) totals[p] = 0;
-  for (const sched of Object.values(multiScheds)) {
-    for (const names of Object.values(sched)) {
-      for (const n of names) totals[n]++;
-    }
-  }
-  const values = Object.values(totals);
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  if (max - min > 2) throw new Error(`Fairness gap too large: ${max - min}`);
-});
 
-runTest("Test 10: Regeneration preserves others and stays valid", () => {
-  const regScheds = {};
-  for (let m = 0; m < 3; m++) {
-    const mKey = `2026-${String(m + 1).padStart(2, "0")}`;
-    const ext = getExternalWeekAssignments(regScheds, mKey);
-    const fair = calculateFairness(defaultPeople, regScheds, mKey, 2);
-    regScheds[mKey] = solveSchedule(2026, m, defaultPeople, 2, ext, fair.cumulativePrior, fair.fairnessDebts);
-  }
-  const origM1 = JSON.stringify(regScheds["2026-01"]);
-  const origM3 = JSON.stringify(regScheds["2026-03"]);
-
-  const extReg2 = getExternalWeekAssignments(regScheds, "2026-02");
-  const fairReg2 = calculateFairness(defaultPeople, regScheds, "2026-02", 2);
-  regScheds["2026-02"] = solveSchedule(2026, 1, defaultPeople, 2, extReg2, fairReg2.cumulativePrior, fairReg2.fairnessDebts);
-
-  if (JSON.stringify(regScheds["2026-01"]) !== origM1) throw new Error("Month 1 changed unexpectedly");
-  if (JSON.stringify(regScheds["2026-03"]) !== origM3) throw new Error("Month 3 changed unexpectedly");
-
-  const check = validateSchedulesGlobal(regScheds, defaultPeople);
-  if (!check.valid) throw new Error(check.error);
-});
-
-runTest("Test 11: Consecutive-month compensation", () => {
-  const compScheds = {};
-  const normalSched = solveSchedule(2026, 0, defaultPeople, 2, {}, {}, {});
-  let alaeRemoved = false;
-  for (const [date, names] of Object.entries(normalSched)) {
-    if (names.includes("Alae") && !alaeRemoved) {
-      normalSched[date] = [];
-      alaeRemoved = true;
-    }
-  }
-  compScheds["2026-01"] = normalSched;
-
-  const ext2 = getExternalWeekAssignments(compScheds, "2026-02");
-  const fair2 = calculateFairness(defaultPeople, compScheds, "2026-02", 2);
-  if (fair2.fairnessDebts["Alae"] !== 1) throw new Error("Alae debt should be 1");
-
-  compScheds["2026-02"] = solveSchedule(2026, 1, defaultPeople, 2, ext2, fair2.cumulativePrior, fair2.fairnessDebts);
-
-  let alaeFebCount = 0;
-  for (const names of Object.values(compScheds["2026-02"])) {
-    if (names.includes("Alae")) alaeFebCount++;
-  }
-  if (alaeFebCount !== 2) throw new Error(`Alae should receive 2 days in Month 2, got ${alaeFebCount}`);
-});
-
-runTest("Test 12: Old data validation detects invalid schedules", () => {
-  const invalidScheds = {
-    "2026-09": {
-      "2026-09-29": ["Othmane"]
-    },
-    "2026-10": {
-      "2026-10-06": ["Othmane"]
-    }
-  };
-  const result = validateSchedulesGlobal(invalidScheds, defaultPeople);
-  if (result.valid) throw new Error("Invalid consecutive weeks were not detected");
+  const workdayOverride = [{ date: "2026-11-18", name: "Working Day Override", isHoliday: false }];
+  const effectiveWithOverride = getEffectiveHolidays([{ date: "2026-11-18", name: "Independence Day" }], workdayOverride);
+  if (effectiveWithOverride["2026-11-18"]) throw new Error("Workday override failed to unmark holiday");
 });
 
 console.log(`\nAll ${passedCount} tests passed successfully.`);

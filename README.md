@@ -1,49 +1,63 @@
 # Work Calendar
 
-A lightweight browser-based work calendar for generating and managing remote-work schedules following a balanced, constraint-aware rotation policy.
+A lightweight, deterministic browser-based work calendar for managing remote-work schedules following a continuous static rotation.
 
-## Scheduling Rules
+## Continuous Rotation Model
 
-The calendar enforces the following hard constraints:
+The scheduling system is based on a single continuous permutation of the seven team members across time:
 
-1. **Allowed Weekdays**: Remote work is permitted exclusively on **Tuesday**, **Wednesday**, and **Thursday**. Monday and Friday are strictly office days.
-2. **One Remote Worker per Day**: Each eligible day contains at most **1 remote worker** (never multiple people on the same date).
-3. **Weekly Limit**: Each person may receive at most **1 remote day per calendar week** (Monday through Sunday).
-4. **No Consecutive Remote Weeks**: A person assigned in calendar week $W$ cannot be assigned in week $W - 1$ or week $W + 1$. There must always be at least one full calendar week without remote work between assignments.
-5. **Cross-Month Week Handling**: Calendar weeks spanning month boundaries (and year boundaries) are treated globally. Assignments in adjacent months are preserved as fixed constraints when generating or regenerating any month.
+1. **Hamza**
+2. **Zakaria**
+3. **Othmane**
+4. **Zouhair**
+5. **Alae**
+6. **Yassine**
+7. **Omar**
 
-## Monthly Target & Long-Term Fairness
+### Core Rules & Invariants
 
-- **Monthly Target**: Up to **2 remote days per person per month** (configurable in Settings).
-- **Scarcity Distribution**: In months where total calendar capacity (number of Tue/Wed/Thu dates) cannot provide everyone with 2 days without violating hard constraints, the scheduler generates the maximum feasible valid assignments rather than failing.
-- **Long-Term Fairness**: The scheduler calculates cumulative fairness debt from persisted history (`fairnessDebt = targetCumulative - actualCumulative`). Employees who received fewer days in previous months automatically receive higher priority in subsequent months.
-
-## Default Team
-
-- Alae
-- Othmane
-- Omar
-- Zakaria
-- Zouhair
-- Hamza
-- Yassine
-
-The employee list and monthly target can be adjusted in Settings.
+1. **Anchor Date**: The rotation sequence begins at anchor date **September 21, 2026**.
+2. **First Scheduled Date**: The first scheduled remote-work slot is **Tuesday, September 22, 2026** (assigned to Hamza).
+3. **Allowed Weekdays**: Remote work is permitted strictly on **Tuesday**, **Wednesday**, and **Thursday**. Monday and Friday are strictly office days.
+4. **Capacity**: At most **1 person** is scheduled per day (never multiple people on the same date).
+5. **Continuous Unbroken Timeline**: The rotation order never resets across weeks, months, or years. It flows continuously across month and year boundaries.
+6. **No Consecutive Remote Weeks**: Because there are 7 people and at most 3 remote slots per week, no employee ever appears in consecutive calendar weeks.
+7. **Moroccan Public Holidays**:
+   - Moroccan public holidays are dynamically retrieved from the public holiday API (`https://date.nager.at/api/v3/PublicHolidays/{year}/MA`) and cached locally in `localStorage` per year.
+   - Holidays falling on Tuesday, Wednesday, or Thursday are skipped for remote work.
+   - An employee whose turn coincides with a holiday is shifted to the very next available remote day without losing their turn.
+   - An offline fallback is maintained for static Moroccan national holidays. A warning banner alerts users if the remote holiday service is unreachable.
+8. **Manual Holiday Overrides**:
+   - Custom overrides can be added or removed through the Settings modal.
+   - Users can designate custom holidays (skipping remote work) or custom workday overrides.
+   - Overrides persist in `localStorage` (`remoteCalendarHolidayOverridesV2`).
 
 ## Persistence & Data Management
 
-- Schedules and settings persist across browser sessions using **localStorage**.
-- **Export**: Creates a timestamped JSON backup containing settings and all saved monthly schedules.
-- **Import**: Restores a calendar backup after validating all global and cross-month hard constraints.
-- When existing saved schedules violate updated policies, a controlled migration recalculates affected months.
+- **Storage**: Holiday overrides and fetched holiday cache persist across browser sessions in `localStorage`.
+- **Export**: Generates a timestamped JSON backup containing the static rotation configuration, anchor date, manual overrides, and cached holiday data.
+- **Import**: Restores manual overrides and cached holiday data with validation and confirmation before applying.
 
-## Usage
+## Verification & Automated Tests
 
-1. Open the [Work Calendar website](https://othmane-elalami.github.io/Work-Calendar/).
-2. Adjust team members or monthly targets in **Settings** if needed.
-3. Click **Randomize month** to generate or reshuffle the current month.
-4. Navigate between months using the arrow buttons.
-5. Use **Export** to create a backup or **Import** to load a backup JSON file.
+A dedicated test suite verifies all 10 core scheduler requirements:
+
+```bash
+node tests/scheduler.test.js
+```
+
+### Test Coverage
+
+1. **Rotation Order Preservation**: Cycles through all 7 members in order across repeated rounds.
+2. **Month Boundary Continuity**: Seamless transition from September to October without resetting.
+3. **Year Boundary Continuity**: Seamless transition from December 2026 to January 2027.
+4. **Holiday Skipping & Turn Retention**: Ensures holidays cancel remote day assignments while retaining turn order for subsequent days.
+5. **Capacity Constraint**: Validates at most 1 person per day.
+6. **Allowed Days Constraint**: Restricts all remote assignments exclusively to Tuesday, Wednesday, and Thursday.
+7. **Consecutive Weeks Constraint**: Guarantees no employee works remotely in adjacent calendar weeks.
+8. **Deterministic Generation**: Verifies identical inputs always produce identical schedules.
+9. **API Outage Fallback**: Validates cache lookup, static holiday fallback, and outage warning flag handling.
+10. **Holiday Manual Overrides**: Validates custom holiday addition, turning off public holidays as workdays, and queue shift retention.
 
 ## Project Structure
 
@@ -61,8 +75,8 @@ Work-Calendar/
 └── README.md
 ```
 
-## Hosting
+## Hosting & Deployment
 
-Hosted on **GitHub Pages** from the `master` branch root directory (`/`).
+Hosted on **GitHub Pages** from the root directory of the `master` branch.
 
 **Live site:** https://othmane-elalami.github.io/Work-Calendar/

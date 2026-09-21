@@ -1,11 +1,18 @@
-const STORAGE_SETTINGS = "remoteCalendarSettingsV1";
-const STORAGE_SCHEDULES = "remoteCalendarSchedulesV1";
-const BACKUP_VERSION = 1;
+const STORAGE_OVERRIDES = "remoteCalendarHolidayOverridesV2";
+const STORAGE_HOLIDAYS_PREFIX = "remoteCalendarHolidays_";
+const BACKUP_VERSION = 2;
 
-const defaultSettings = {
-  people: ["Alae", "Othmane", "Omar", "Zakaria", "Zouhair", "Hamza", "Yassine"],
-  daysPerPerson: 2
-};
+const ROTATION_ORDER = [
+  "Hamza",
+  "Zakaria",
+  "Othmane",
+  "Zouhair",
+  "Alae",
+  "Yassine",
+  "Omar"
+];
+
+const ANCHOR_DATE = "2026-09-21";
 
 const palette = [
   "#a970ff",
@@ -14,69 +21,21 @@ const palette = [
   "#62d9a3",
   "#ffb45f",
   "#ff6b7f",
-  "#b9d866",
-  "#7f8cff",
-  "#eb8dff",
-  "#54d5d0",
-  "#ffc857",
-  "#ff8ea1"
+  "#b9d866"
 ];
 
-let settings = loadSettings();
-let schedules = loadSchedules();
+let holidayOverrides = loadHolidayOverrides();
+let holidaysCache = {};
 let currentDate = new Date();
 currentDate.setDate(1);
 
-const monthLabel = typeof document !== "undefined" ? document.getElementById("monthLabel") : null;
-const calendarGrid = typeof document !== "undefined" ? document.getElementById("calendarGrid") : null;
-const summary = typeof document !== "undefined" ? document.getElementById("summary") : null;
-const legend = typeof document !== "undefined" ? document.getElementById("legend") : null;
-const settingsModal = typeof document !== "undefined" ? document.getElementById("settingsModal") : null;
-const daysPerPersonInput = typeof document !== "undefined" ? document.getElementById("daysPerPersonInput") : null;
-const peopleEditor = typeof document !== "undefined" ? document.getElementById("peopleEditor") : null;
-const toast = typeof document !== "undefined" ? document.getElementById("toast") : null;
-const importFileInput = typeof document !== "undefined" ? document.getElementById("importFileInput") : null;
-
-function loadSettings() {
-  try {
-    const saved = JSON.parse(localStorage.getItem(STORAGE_SETTINGS));
-    if (saved && Array.isArray(saved.people)) {
-      return {
-        people: saved.people,
-        daysPerPerson: Number(saved.daysPerPerson) || 2
-      };
-    }
-  } catch {}
-  return structuredClone(defaultSettings);
-}
-
-function loadSchedules() {
-  try {
-    return JSON.parse(localStorage.getItem(STORAGE_SCHEDULES)) || {};
-  } catch {
-    return {};
-  }
-}
-
-function saveSettingsState() {
-  localStorage.setItem(STORAGE_SETTINGS, JSON.stringify(settings));
-}
-
-function saveSchedulesState() {
-  localStorage.setItem(STORAGE_SCHEDULES, JSON.stringify(schedules));
-}
-
-function monthKey(date) {
-  const y = typeof date === "string" ? date.slice(0, 4) : date.getFullYear();
-  const m = typeof date === "string" ? date.slice(5, 7) : String(date.getMonth() + 1).padStart(2, "0");
-  return `${y}-${m}`;
-}
-
-function daysInMonth(year, month) {
-  return new Date(year, month + 1, 0).getDate();
-}
-
 function isoDate(year, month, day) {
+  if (year instanceof Date) {
+    const y = year.getFullYear();
+    const m = String(year.getMonth() + 1).padStart(2, "0");
+    const d = String(year.getDate()).padStart(2, "0");
+    return `${y}-${m}-${d}`;
+  }
   return `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
 
@@ -113,335 +72,210 @@ function getNextWeekKey(wk) {
   return addDays(wk, 7);
 }
 
-function shuffle(array) {
-  const result = [...array];
-  for (let i = result.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [result[i], result[j]] = [result[j], result[i]];
-  }
-  return result;
+function monthKey(date) {
+  const y = typeof date === "string" ? date.slice(0, 4) : date.getFullYear();
+  const m = typeof date === "string" ? date.slice(5, 7) : String(date.getMonth() + 1).padStart(2, "0");
+  return `${y}-${m}`;
 }
 
-function getEligibleDates(year, month) {
-  const dates = [];
-  const total = daysInMonth(year, month);
-  for (let day = 1; day <= total; day++) {
-    const date = new Date(year, month, day);
-    const weekday = toMondayIndex(date.getDay());
-    if (weekday >= 2 && weekday <= 4) {
-      dates.push(isoDate(year, month, day));
+function daysInMonth(year, month) {
+  return new Date(year, month + 1, 0).getDate();
+}
+
+function getStaticHolidays(year) {
+  return [
+    { date: `${year}-01-01`, name: "New Year's Day" },
+    { date: `${year}-01-11`, name: "Proclamation of Independence" },
+    { date: `${year}-05-01`, name: "Labour Day" },
+    { date: `${year}-07-30`, name: "Feast of the Throne" },
+    { date: `${year}-08-14`, name: "Oued Ed-Dahab Day" },
+    { date: `${year}-08-20`, name: "Revolution of the King and the People" },
+    { date: `${year}-08-21`, name: "Youth Day" },
+    { date: `${year}-11-06`, name: "Green March" },
+    { date: `${year}-11-18`, name: "Independence Day" }
+  ];
+}
+
+function getEffectiveHolidays(apiHolidays = [], overrides = []) {
+  const effective = {};
+  for (const h of apiHolidays) {
+    if (h && h.date) {
+      effective[h.date] = h.name || h.localName || "Public Holiday";
     }
   }
-  return dates;
-}
-
-function getExternalWeekAssignments(storedSchedules, excludeMonthKey) {
-  const externalWeeks = {};
-  for (const [mKey, sched] of Object.entries(storedSchedules)) {
-    if (mKey === excludeMonthKey) continue;
-    if (!sched || typeof sched !== "object") continue;
-    for (const [date, names] of Object.entries(sched)) {
-      if (!Array.isArray(names) || !names.length) continue;
-      const wk = getWeekKey(date);
-      if (!externalWeeks[wk]) externalWeeks[wk] = new Set();
-      for (const name of names) {
-        externalWeeks[wk].add(name);
+  for (const ov of overrides) {
+    if (ov && ov.date) {
+      if (ov.isHoliday === false) {
+        delete effective[ov.date];
+      } else {
+        effective[ov.date] = ov.name || "Holiday";
       }
     }
   }
-  return externalWeeks;
+  return effective;
 }
 
-function calculateFairness(people, storedSchedules, excludeMonthKey, targetPerMonth) {
-  const cumulativePrior = {};
-  const fairnessDebts = {};
-  for (const p of people) {
-    cumulativePrior[p] = 0;
+function loadHolidayOverrides() {
+  if (typeof window === "undefined" || !window.localStorage) return [];
+  try {
+    const raw = window.localStorage.getItem(STORAGE_OVERRIDES);
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
   }
-  let otherMonthsCount = 0;
-  for (const [mKey, sched] of Object.entries(storedSchedules)) {
-    if (mKey === excludeMonthKey) continue;
-    if (!sched || typeof sched !== "object") continue;
-    const hasAssignments = Object.values(sched).some(names => Array.isArray(names) && names.length > 0);
-    if (!hasAssignments) continue;
-    otherMonthsCount++;
-    for (const names of Object.values(sched)) {
-      if (Array.isArray(names)) {
-        for (const n of names) {
-          if (cumulativePrior[n] !== undefined) {
-            cumulativePrior[n]++;
-          }
+}
+
+function saveHolidayOverridesState() {
+  if (typeof window === "undefined" || !window.localStorage) return;
+  window.localStorage.setItem(STORAGE_OVERRIDES, JSON.stringify(holidayOverrides));
+}
+
+function getLocalHolidaysForYear(year) {
+  if (holidaysCache[year]) {
+    return holidaysCache[year];
+  }
+  if (typeof window !== "undefined" && window.localStorage) {
+    try {
+      const stored = window.localStorage.getItem(`${STORAGE_HOLIDAYS_PREFIX}${year}`);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed.holidays) && parsed.holidays.length) {
+          holidaysCache[year] = parsed.holidays;
+          return holidaysCache[year];
         }
       }
-    }
+    } catch {}
   }
-  for (const p of people) {
-    const target = otherMonthsCount * targetPerMonth;
-    fairnessDebts[p] = target - cumulativePrior[p];
-  }
-  return { cumulativePrior, fairnessDebts, otherMonthsCount };
+  return null;
 }
 
-function solveSchedule(year, month, people, daysPerPersonTarget, externalWeeks, cumulativePrior, fairnessDebts) {
-  const eligibleDates = getEligibleDates(year, month);
-  const weekMap = {};
-  for (const d of eligibleDates) {
-    const wk = getWeekKey(d);
-    if (!weekMap[wk]) weekMap[wk] = [];
-    weekMap[wk].push(d);
+async function fetchHolidaysForYear(year) {
+  const cacheKey = `${STORAGE_HOLIDAYS_PREFIX}${year}`;
+  try {
+    const res = await fetch(`https://date.nager.at/api/v3/PublicHolidays/${year}/MA`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    if (Array.isArray(data)) {
+      holidaysCache[year] = data;
+      if (typeof window !== "undefined" && window.localStorage) {
+        window.localStorage.setItem(cacheKey, JSON.stringify({ timestamp: Date.now(), holidays: data }));
+      }
+      return { holidays: data, fromCache: false, fallbackUsed: false };
+    }
+  } catch {
+    const cached = getLocalHolidaysForYear(year);
+    if (cached) {
+      return { holidays: cached, fromCache: true, fallbackUsed: false };
+    }
+    const fallback = getStaticHolidays(year);
+    holidaysCache[year] = fallback;
+    return { holidays: fallback, fromCache: false, fallbackUsed: true };
   }
-  const weekKeys = Object.keys(weekMap).sort();
-  const W = weekKeys.length;
-  const P = people.length;
-
-  const weekCapacities = weekKeys.map(wk => weekMap[wk].length);
-  const suffixCapacity = new Array(W + 1).fill(0);
-  for (let i = W - 1; i >= 0; i--) {
-    suffixCapacity[i] = suffixCapacity[i + 1] + weekCapacities[i];
-  }
-
-  const personWeekAllowed = Array.from({ length: W }, () => new Array(P).fill(true));
-  for (let i = 0; i < W; i++) {
-    const wk = weekKeys[i];
-    const prevWk = getPreviousWeekKey(wk);
-    const nextWk = getNextWeekKey(wk);
-    for (let p = 0; p < P; p++) {
-      const person = people[p];
-      if (externalWeeks[wk] && externalWeeks[wk].has(person)) {
-        personWeekAllowed[i][p] = false;
-      }
-      if (externalWeeks[prevWk] && externalWeeks[prevWk].has(person)) {
-        personWeekAllowed[i][p] = false;
-      }
-      if (externalWeeks[nextWk] && externalWeeks[nextWk].has(person)) {
-        personWeekAllowed[i][p] = false;
-      }
-    }
-  }
-
-  let bestScore = -Infinity;
-  let bestTotalAssignments = -1;
-  let bestSolution = null;
-
-  const currentSolution = Array.from({ length: W }, () => []);
-  const personCounts = new Array(P).fill(0);
-  let currentTotalAssignments = 0;
-
-  function evaluateSolution() {
-    let targetMetCount = 0;
-    let debtBonus = 0;
-    let sumSq = 0;
-    for (let p = 0; p < P; p++) {
-      const c = personCounts[p];
-      if (c === daysPerPersonTarget) targetMetCount++;
-      const debt = fairnessDebts[people[p]] || 0;
-      debtBonus += c * debt * 50;
-      const totalCum = (cumulativePrior[people[p]] || 0) + c;
-      sumSq += totalCum * totalCum;
-    }
-    return currentTotalAssignments * 100000 + targetMetCount * 2000 + debtBonus - sumSq * 10;
-  }
-
-  function search(weekIdx) {
-    const maxPossibleAssignments = currentTotalAssignments + suffixCapacity[weekIdx];
-    if (maxPossibleAssignments < bestTotalAssignments) {
-      return;
-    }
-
-    if (weekIdx === W) {
-      const score = evaluateSolution();
-      if (currentTotalAssignments > bestTotalAssignments || (currentTotalAssignments === bestTotalAssignments && score > bestScore)) {
-        bestScore = score;
-        bestTotalAssignments = currentTotalAssignments;
-        bestSolution = currentSolution.map(arr => [...arr]);
-      }
-      return;
-    }
-
-    const maxCapacity = weekCapacities[weekIdx];
-    const prevAssigned = weekIdx > 0 ? new Set(currentSolution[weekIdx - 1]) : new Set();
-    const availablePeople = [];
-    for (let p = 0; p < P; p++) {
-      if (!personWeekAllowed[weekIdx][p]) continue;
-      if (prevAssigned.has(p)) continue;
-      if (personCounts[p] >= daysPerPersonTarget) continue;
-      availablePeople.push(p);
-    }
-
-    availablePeople.sort((a, b) => {
-      const debtA = fairnessDebts[people[a]] || 0;
-      const debtB = fairnessDebts[people[b]] || 0;
-      if (debtB !== debtA) return debtB - debtA;
-      const cumA = (cumulativePrior[people[a]] || 0) + personCounts[a];
-      const cumB = (cumulativePrior[people[b]] || 0) + personCounts[b];
-      if (cumA !== cumB) return cumA - cumB;
-      return Math.random() - 0.5;
-    });
-
-    const maxK = Math.min(availablePeople.length, maxCapacity);
-
-    function generateSubsets(start, currentSubset, k) {
-      if (currentSubset.length === k) {
-        currentSolution[weekIdx] = currentSubset;
-        for (const p of currentSubset) personCounts[p]++;
-        currentTotalAssignments += k;
-
-        search(weekIdx + 1);
-
-        currentTotalAssignments -= k;
-        for (const p of currentSubset) personCounts[p]--;
-        currentSolution[weekIdx] = [];
-        return;
-      }
-      for (let i = start; i < availablePeople.length; i++) {
-        currentSubset.push(availablePeople[i]);
-        generateSubsets(i + 1, currentSubset, k);
-        currentSubset.pop();
-      }
-    }
-
-    for (let k = maxK; k >= 0; k--) {
-      if (currentTotalAssignments + k + suffixCapacity[weekIdx + 1] < bestTotalAssignments) {
-        break;
-      }
-      generateSubsets(0, [], k);
-    }
-  }
-
-  search(0);
-
-  const schedule = {};
-  for (const d of eligibleDates) schedule[d] = [];
-  if (bestSolution) {
-    for (let i = 0; i < W; i++) {
-      const wk = weekKeys[i];
-      const dates = shuffle([...weekMap[wk]]);
-      const assignedPersonIndices = shuffle([...bestSolution[i]]);
-      for (let j = 0; j < assignedPersonIndices.length; j++) {
-        schedule[dates[j]] = [people[assignedPersonIndices[j]]];
-      }
-    }
-  }
-
-  return schedule;
+  const fallback = getStaticHolidays(year);
+  holidaysCache[year] = fallback;
+  return { holidays: fallback, fromCache: false, fallbackUsed: true };
 }
 
-function generateSchedule(year, month) {
-  const currentMKey = monthKey(new Date(year, month, 1));
-  const externalWeeks = getExternalWeekAssignments(schedules, currentMKey);
-  const { cumulativePrior, fairnessDebts } = calculateFairness(settings.people, schedules, currentMKey, settings.daysPerPerson);
-  return solveSchedule(year, month, settings.people, settings.daysPerPerson, externalWeeks, cumulativePrior, fairnessDebts);
+function getAllEffectiveHolidays(targetYear) {
+  const startYear = 2026;
+  const endYear = Math.max(2026, targetYear);
+  const allHolidays = [];
+  let anyFallbackUsed = false;
+
+  for (let y = startYear; y <= endYear; y++) {
+    const list = getLocalHolidaysForYear(y);
+    if (list) {
+      allHolidays.push(...list);
+    } else {
+      const fallback = getStaticHolidays(y);
+      holidaysCache[y] = fallback;
+      allHolidays.push(...fallback);
+      anyFallbackUsed = true;
+    }
+  }
+
+  const effective = getEffectiveHolidays(allHolidays, holidayOverrides);
+  return { effective, anyFallbackUsed };
 }
 
-function validateSchedulesGlobal(storedSchedules, people) {
-  const personSet = new Set(people);
-  const personWeeks = {};
+async function syncHolidays(targetYear) {
+  const startYear = 2026;
+  const endYear = Math.max(2026, targetYear);
+  let warningActive = false;
 
-  for (const [, sched] of Object.entries(storedSchedules)) {
-    if (!sched || typeof sched !== "object") continue;
-    for (const [date, names] of Object.entries(sched)) {
-      if (!Array.isArray(names) || !names.length) continue;
-      if (names.length > 1) {
-        return { valid: false, error: `Date ${date} has more than one person assigned (${names.join(", ")}).` };
-      }
-      const person = names[0];
-      if (!personSet.has(person)) {
-        return { valid: false, error: `Unknown person ${person} on date ${date}.` };
-      }
-      const [y, m, d] = date.split("-").map(Number);
-      const wd = toMondayIndex(new Date(y, m - 1, d).getDay());
-      if (wd < 2 || wd > 4) {
-        return { valid: false, error: `Date ${date} is not an allowed weekday (only Tue, Wed, Thu allowed).` };
-      }
-      const wk = getWeekKey(date);
-      if (!personWeeks[person]) personWeeks[person] = [];
-      personWeeks[person].push({ date, wk });
+  for (let y = startYear; y <= endYear; y++) {
+    const res = await fetchHolidaysForYear(y);
+    if (res.fallbackUsed) {
+      warningActive = true;
     }
   }
 
-  for (const [person, list] of Object.entries(personWeeks)) {
-    const datesByWeek = {};
-    for (const item of list) {
-      if (!datesByWeek[item.wk]) datesByWeek[item.wk] = [];
-      datesByWeek[item.wk].push(item.date);
-    }
-    for (const [wk, dates] of Object.entries(datesByWeek)) {
-      if (dates.length > 1) {
-        return {
-          valid: false,
-          error: `${person} is assigned multiple times during the week beginning ${wk} (${dates.join(", ")}).`
-        };
-      }
-    }
-
-    const uniqueWeeks = Object.keys(datesByWeek).sort();
-    for (let i = 0; i < uniqueWeeks.length - 1; i++) {
-      const w1 = uniqueWeeks[i];
-      const w2 = uniqueWeeks[i + 1];
-      if (getNextWeekKey(w1) === w2) {
-        return {
-          valid: false,
-          error: `Import conflict: ${person} is assigned during consecutive weeks beginning ${w1} and ${w2}.`
-        };
-      }
-    }
-  }
-
-  return { valid: true };
+  updateWarningBanner(warningActive);
+  renderCalendar();
 }
 
-function migrateExistingSchedules() {
-  const check = validateSchedulesGlobal(schedules, settings.people);
-  if (check.valid) return false;
-
-  const sortedMonthKeys = Object.keys(schedules).sort();
-  const migrated = {};
-  for (const mKey of sortedMonthKeys) {
-    const [y, m] = mKey.split("-").map(Number);
-    const externalWeeks = getExternalWeekAssignments(migrated, mKey);
-    const { cumulativePrior, fairnessDebts } = calculateFairness(settings.people, migrated, mKey, settings.daysPerPerson);
-    migrated[mKey] = solveSchedule(y, m - 1, settings.people, settings.daysPerPerson, externalWeeks, cumulativePrior, fairnessDebts);
+function updateWarningBanner(show) {
+  const banner = document.getElementById("warningBanner");
+  if (!banner) return;
+  if (show) {
+    banner.textContent = "Warning: Public holiday service (https://date.nager.at) unreachable. Using cached or fallback Moroccan public holidays.";
+    banner.style.display = "flex";
+  } else {
+    banner.style.display = "none";
   }
-  schedules = migrated;
-  saveSchedulesState();
-  return true;
 }
 
-function ensureCurrentSchedule() {
-  const key = monthKey(currentDate);
-  const year = currentDate.getFullYear();
-  const month = currentDate.getMonth();
+function computeSchedule(endDateIso, rotationOrder = ROTATION_ORDER, anchorDate = ANCHOR_DATE, effectiveHolidaysMap = {}) {
+  const [ay, am, ad] = anchorDate.split("-").map(Number);
+  const [ey, em, ed] = endDateIso.split("-").map(Number);
 
-  if (!schedules[key]) {
-    try {
-      schedules[key] = generateSchedule(year, month);
-      saveSchedulesState();
-    } catch (error) {
-      showToast(error.message, true);
-      schedules[key] = {};
+  let cur = new Date(ay, am - 1, ad);
+  const end = new Date(ey, em - 1, ed);
+
+  let rotationIndex = 0;
+  const assignments = {};
+  const holidays = {};
+
+  while (cur <= end) {
+    const y = cur.getFullYear();
+    const m = cur.getMonth();
+    const d = cur.getDate();
+    const dateStr = isoDate(y, m, d);
+    const wd = toMondayIndex(cur.getDay());
+
+    if (wd >= 2 && wd <= 4) {
+      if (effectiveHolidaysMap[dateStr]) {
+        holidays[dateStr] = effectiveHolidaysMap[dateStr];
+      } else {
+        assignments[dateStr] = rotationOrder[rotationIndex % rotationOrder.length];
+        rotationIndex++;
+      }
     }
+
+    cur.setDate(cur.getDate() + 1);
   }
-  return schedules[key];
+
+  return { assignments, holidays, totalAssigned: rotationIndex };
 }
 
 function personColor(name) {
-  const index = settings.people.indexOf(name);
+  const index = ROTATION_ORDER.indexOf(name);
   return palette[(index >= 0 ? index : 0) % palette.length];
 }
 
-function renderLegend(schedule) {
+function renderLegend(assignmentsInMonth) {
+  const legend = document.getElementById("legend");
   if (!legend) return;
   legend.innerHTML = "";
 
   const personCounts = {};
-  for (const p of settings.people) personCounts[p] = 0;
-  for (const names of Object.values(schedule)) {
-    for (const n of names) {
-      if (personCounts[n] !== undefined) personCounts[n]++;
-    }
+  for (const p of ROTATION_ORDER) personCounts[p] = 0;
+  for (const name of Object.values(assignmentsInMonth)) {
+    if (personCounts[name] !== undefined) personCounts[name]++;
   }
 
-  settings.people.forEach(person => {
+  ROTATION_ORDER.forEach(person => {
     const count = personCounts[person] || 0;
     const item = document.createElement("div");
     item.className = "legend-item";
@@ -450,38 +284,62 @@ function renderLegend(schedule) {
   });
 }
 
-function renderSummary(schedule) {
+function renderSummary(assignmentsInMonth, holidaysInMonth) {
+  const summary = document.getElementById("summary");
   if (!summary) return;
-  const totalAssignments = Object.values(schedule).reduce((sum, names) => sum + names.length, 0);
-  const activeDays = Object.values(schedule).filter(names => names.length).length;
-  const targetAssignments = settings.people.length * settings.daysPerPerson;
+  const remoteCount = Object.keys(assignmentsInMonth).length;
+  const holidayCount = Object.keys(holidaysInMonth).length;
 
-  summary.innerHTML = `
-    <div class="summary-pill">${settings.people.length} people</div>
-    <div class="summary-pill">Target: ${settings.daysPerPerson} / person</div>
-    <div class="summary-pill">Scheduled: ${totalAssignments} / ${targetAssignments} target assignments</div>
-    <div class="summary-pill">${activeDays} active remote days</div>
+  let html = `
+    <div class="summary-pill">${ROTATION_ORDER.length} people</div>
+    <div class="summary-pill">Rotation anchor: Sep 21, 2026</div>
+    <div class="summary-pill">${remoteCount} remote days this month</div>
   `;
+  if (holidayCount > 0) {
+    html += `<div class="summary-pill">${holidayCount} holiday${holidayCount > 1 ? "s" : ""} skipped</div>`;
+  }
+  summary.innerHTML = html;
 }
 
 function renderCalendar() {
+  const calendarGrid = document.getElementById("calendarGrid");
+  const monthLabel = document.getElementById("monthLabel");
   if (!calendarGrid || !monthLabel) return;
+
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth();
-  const schedule = ensureCurrentSchedule();
+  const totalDays = daysInMonth(year, month);
+  const endIso = isoDate(year, month, totalDays);
+
+  const { effective } = getAllEffectiveHolidays(year);
+  const scheduleData = computeSchedule(endIso, ROTATION_ORDER, ANCHOR_DATE, effective);
 
   monthLabel.textContent = currentDate.toLocaleDateString(undefined, {
     month: "long",
     year: "numeric"
   });
 
-  renderLegend(schedule);
-  renderSummary(schedule);
+  const monthPrefix = `${year}-${String(month + 1).padStart(2, "0")}`;
+  const assignmentsInMonth = {};
+  const holidaysInMonth = {};
+
+  for (const [date, name] of Object.entries(scheduleData.assignments)) {
+    if (date.startsWith(monthPrefix)) {
+      assignmentsInMonth[date] = name;
+    }
+  }
+  for (const [date, name] of Object.entries(scheduleData.holidays)) {
+    if (date.startsWith(monthPrefix)) {
+      holidaysInMonth[date] = name;
+    }
+  }
+
+  renderLegend(assignmentsInMonth);
+  renderSummary(assignmentsInMonth, holidaysInMonth);
   calendarGrid.innerHTML = "";
 
   const first = new Date(year, month, 1);
   const leading = toMondayIndex(first.getDay()) - 1;
-  const totalDays = daysInMonth(year, month);
   const totalCells = Math.ceil((leading + totalDays) / 7) * 7;
   const today = new Date();
   const todayIso = isoDate(today.getFullYear(), today.getMonth(), today.getDate());
@@ -499,162 +357,176 @@ function renderCalendar() {
     const date = new Date(year, month, dayNumber);
     const weekday = toMondayIndex(date.getDay());
     const dateIso = isoDate(year, month, dayNumber);
-    const allowed = weekday >= 2 && weekday <= 4;
-    const names = schedule[dateIso] || [];
+    const isAllowedWeekday = weekday >= 2 && weekday <= 4;
+    const isBeforeAnchor = dateIso < ANCHOR_DATE;
+    const holidayName = scheduleData.holidays[dateIso];
+    const assignedPerson = scheduleData.assignments[dateIso];
 
-    dayEl.className = `day${allowed ? "" : " disabled"}${dateIso === todayIso ? " today" : ""}`;
+    let dayClass = "day";
+    if (dateIso === todayIso) dayClass += " today";
 
-    const stateText = allowed ? (names.length ? `${names.length} remote` : "Available") : "Office";
-    const chips = names.map(name => `
-      <div class="remote-chip" title="${escapeHtml(name)}">
-        <span class="dot" style="background:${personColor(name)}"></span>
-        <span>${escapeHtml(name)}</span>
-      </div>
-    `).join("");
-
-    dayEl.innerHTML = `
-      <div class="day-number">
-        <span class="num">${dayNumber}</span>
-        <span class="day-state">${stateText}</span>
-      </div>
-      <div class="remote-list">${chips}</div>
-    `;
+    if (!isAllowedWeekday) {
+      dayClass += " disabled";
+      dayEl.className = dayClass;
+      dayEl.innerHTML = `
+        <div class="day-number">
+          <span class="num">${dayNumber}</span>
+          <span class="day-state">Office</span>
+        </div>
+      `;
+    } else if (isBeforeAnchor) {
+      dayClass += " disabled";
+      dayEl.className = dayClass;
+      dayEl.innerHTML = `
+        <div class="day-number">
+          <span class="num">${dayNumber}</span>
+          <span class="day-state">Pre-rotation</span>
+        </div>
+      `;
+    } else if (holidayName) {
+      dayClass += " holiday";
+      dayEl.className = dayClass;
+      dayEl.innerHTML = `
+        <div class="day-number">
+          <span class="num">${dayNumber}</span>
+          <span class="day-state holiday">Holiday</span>
+        </div>
+        <div class="remote-list">
+          <div class="holiday-chip" title="${escapeHtml(holidayName)}">
+            <span>${escapeHtml(holidayName)}</span>
+          </div>
+        </div>
+      `;
+    } else if (assignedPerson) {
+      dayEl.className = dayClass;
+      dayEl.innerHTML = `
+        <div class="day-number">
+          <span class="num">${dayNumber}</span>
+          <span class="day-state">1 remote</span>
+        </div>
+        <div class="remote-list">
+          <div class="remote-chip" title="${escapeHtml(assignedPerson)}">
+            <span class="dot" style="background:${personColor(assignedPerson)}"></span>
+            <span>${escapeHtml(assignedPerson)}</span>
+          </div>
+        </div>
+      `;
+    } else {
+      dayEl.className = dayClass;
+      dayEl.innerHTML = `
+        <div class="day-number">
+          <span class="num">${dayNumber}</span>
+          <span class="day-state">Available</span>
+        </div>
+      `;
+    }
 
     calendarGrid.appendChild(dayEl);
   }
 }
 
-function regenerateCurrentMonth() {
-  const key = monthKey(currentDate);
-  try {
-    schedules[key] = generateSchedule(currentDate.getFullYear(), currentDate.getMonth());
-    saveSchedulesState();
-    renderCalendar();
-    showToast("Fresh schedule generated.");
-  } catch (error) {
-    showToast(error.message, true);
-  }
-}
-
 function openSettings() {
-  if (!settingsModal) return;
-  daysPerPersonInput.value = settings.daysPerPerson;
-  renderPeopleEditor();
-  settingsModal.classList.add("open");
+  const modal = document.getElementById("settingsModal");
+  if (!modal) return;
+  renderRotationInfo();
+  renderOverridesList();
+  modal.classList.add("open");
 }
 
 function closeSettings() {
-  if (!settingsModal) return;
-  settingsModal.classList.remove("open");
+  const modal = document.getElementById("settingsModal");
+  if (!modal) return;
+  modal.classList.remove("open");
 }
 
-function renderPeopleEditor() {
-  if (!peopleEditor) return;
-  peopleEditor.innerHTML = "";
+function renderRotationInfo() {
+  const meta = document.getElementById("rotationMeta");
+  const list = document.getElementById("rotationList");
+  if (meta) {
+    meta.textContent = `Anchor start date: ${ANCHOR_DATE} (first scheduled date: Tuesday, 2026-09-22)`;
+  }
+  if (list) {
+    list.innerHTML = "";
+    ROTATION_ORDER.forEach(name => {
+      const li = document.createElement("li");
+      li.textContent = name;
+      list.appendChild(li);
+    });
+  }
+}
 
-  settings.people.forEach((person, index) => {
-    const row = document.createElement("div");
-    row.className = "person-row";
-    row.innerHTML = `
-      <input class="input person-name" value="${escapeHtml(person)}" data-index="${index}" aria-label="Person name">
-      <button class="btn danger remove-person" data-index="${index}">Remove</button>
+function renderOverridesList() {
+  const container = document.getElementById("overrideList");
+  if (!container) return;
+  container.innerHTML = "";
+
+  if (!holidayOverrides.length) {
+    container.innerHTML = `<div style="color:var(--muted);font-size:0.84rem;padding:8px;">No custom overrides defined.</div>`;
+    return;
+  }
+
+  holidayOverrides.forEach((ov, index) => {
+    const item = document.createElement("div");
+    item.className = "override-item";
+    const statusText = ov.isHoliday ? "Holiday" : "Workday";
+    item.innerHTML = `
+      <span><strong>${escapeHtml(ov.date)}</strong> — ${escapeHtml(ov.name || statusText)} (${statusText})</span>
+      <button class="btn danger" data-index="${index}">Remove</button>
     `;
-    peopleEditor.appendChild(row);
+    container.appendChild(item);
   });
 
-  document.querySelectorAll(".remove-person").forEach(button => {
-    button.addEventListener("click", () => {
-      const index = Number(button.dataset.index);
-      const tempPeople = getPeopleFromEditor();
-      tempPeople.splice(index, 1);
-      setPeopleEditor(tempPeople);
+  container.querySelectorAll("button[data-index]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const idx = Number(btn.dataset.index);
+      holidayOverrides.splice(idx, 1);
+      saveHolidayOverridesState();
+      renderOverridesList();
+      renderCalendar();
+      showToast("Holiday override removed.");
     });
   });
 }
 
-function setPeopleEditor(people) {
-  if (!peopleEditor) return;
-  peopleEditor.innerHTML = "";
+function addOverride() {
+  const dateInput = document.getElementById("overrideDateInput");
+  const nameInput = document.getElementById("overrideNameInput");
+  const typeSelect = document.getElementById("overrideTypeSelect");
+  if (!dateInput || !typeSelect) return;
 
-  people.forEach((person, index) => {
-    const row = document.createElement("div");
-    row.className = "person-row";
-    row.innerHTML = `
-      <input class="input person-name" value="${escapeHtml(person)}" data-index="${index}" aria-label="Person name">
-      <button class="btn danger remove-person" data-index="${index}">Remove</button>
-    `;
-    peopleEditor.appendChild(row);
-  });
-
-  document.querySelectorAll(".remove-person").forEach(button => {
-    button.addEventListener("click", () => {
-      const list = getPeopleFromEditor();
-      list.splice(Number(button.dataset.index), 1);
-      setPeopleEditor(list);
-    });
-  });
-}
-
-function getPeopleFromEditor() {
-  if (!peopleEditor) return [];
-  return [...peopleEditor.querySelectorAll(".person-name")]
-    .map(input => input.value.trim())
-    .filter(Boolean);
-}
-
-function saveSettingsFromModal() {
-  const people = getPeopleFromEditor();
-  const daysPerPerson = Math.max(1, Number(daysPerPersonInput.value) || 2);
-
-  if (!people.length) {
-    showToast("Add at least one person.", true);
+  const dateVal = dateInput.value.trim();
+  if (!dateVal) {
+    showToast("Please select a date.", true);
     return;
   }
 
-  const duplicate = people.find((name, index) => people.findIndex(other => other.toLowerCase() === name.toLowerCase()) !== index);
-  if (duplicate) {
-    showToast(`Duplicate person: ${duplicate}`, true);
-    return;
+  const isHoliday = typeSelect.value === "holiday";
+  const nameVal = nameInput ? nameInput.value.trim() : "";
+  const name = nameVal || (isHoliday ? "Manual Holiday" : "Workday Override");
+
+  const existingIdx = holidayOverrides.findIndex(o => o.date === dateVal);
+  if (existingIdx >= 0) {
+    holidayOverrides[existingIdx] = { date: dateVal, name, isHoliday };
+  } else {
+    holidayOverrides.push({ date: dateVal, name, isHoliday });
   }
 
-  settings = {
-    people,
-    daysPerPerson
-  };
-
-  const key = monthKey(currentDate);
-  try {
-    schedules[key] = generateSchedule(currentDate.getFullYear(), currentDate.getMonth());
-  } catch (err) {
-    schedules[key] = {};
-  }
-
-  saveSettingsState();
-  saveSchedulesState();
-  closeSettings();
+  holidayOverrides.sort((a, b) => a.date.localeCompare(b.date));
+  saveHolidayOverridesState();
+  if (nameInput) nameInput.value = "";
+  renderOverridesList();
   renderCalendar();
-  showToast("Settings saved and schedule updated.");
-}
-
-function addPerson() {
-  const people = getPeopleFromEditor();
-  people.push(`Person ${people.length + 1}`);
-  setPeopleEditor(people);
-
-  requestAnimationFrame(() => {
-    const inputs = peopleEditor.querySelectorAll(".person-name");
-    const last = inputs[inputs.length - 1];
-    last.focus();
-    last.select();
-  });
+  showToast("Holiday override saved.");
 }
 
 function exportCalendarData() {
   const payload = {
     version: BACKUP_VERSION,
     exportedAt: new Date().toISOString(),
-    settings,
-    schedules
+    rotationOrder: ROTATION_ORDER,
+    anchorDate: ANCHOR_DATE,
+    overrides: holidayOverrides,
+    cachedHolidays: holidaysCache
   };
 
   const json = JSON.stringify(payload, null, 2);
@@ -664,64 +536,35 @@ function exportCalendarData() {
   const stamp = new Date().toISOString().slice(0, 10);
 
   link.href = url;
-  link.download = `work-calendar-backup-${stamp}.json`;
+  link.download = `work-calendar-rotation-backup-${stamp}.json`;
   document.body.appendChild(link);
   link.click();
   link.remove();
   URL.revokeObjectURL(url);
 
-  showToast("Calendar data exported.");
+  showToast("Calendar backup exported.");
 }
 
 function validateImportedData(data) {
   if (!data || typeof data !== "object") {
     throw new Error("Invalid backup file.");
   }
-
-  if (!data.settings || typeof data.settings !== "object") {
-    throw new Error("The backup does not contain calendar settings.");
+  if (!Array.isArray(data.overrides)) {
+    throw new Error("Backup is missing valid overrides list.");
   }
-
-  if (!data.schedules || typeof data.schedules !== "object" || Array.isArray(data.schedules)) {
-    throw new Error("The backup does not contain valid schedules.");
+  for (const ov of data.overrides) {
+    if (!ov || typeof ov.date !== "string" || !ov.date.match(/^\d{4}-\d{2}-\d{2}$/)) {
+      throw new Error("Backup contains invalid override dates.");
+    }
   }
-
-  const importedSettings = data.settings;
-
-  if (!Array.isArray(importedSettings.people) || !importedSettings.people.length) {
-    throw new Error("The backup contains an invalid people list.");
-  }
-
-  const people = importedSettings.people
-    .map(person => String(person).trim())
-    .filter(Boolean);
-
-  const normalizedNames = people.map(person => person.toLowerCase());
-
-  if (people.length !== importedSettings.people.length || new Set(normalizedNames).size !== people.length) {
-    throw new Error("The backup contains empty or duplicate names.");
-  }
-
-  const daysPerPerson = Number(importedSettings.daysPerPerson);
-  if (!Number.isInteger(daysPerPerson) || daysPerPerson < 1) {
-    throw new Error("The backup contains an invalid monthly remote-day count.");
-  }
-
-  const globalCheck = validateSchedulesGlobal(data.schedules, people);
-  if (!globalCheck.valid) {
-    throw new Error(globalCheck.error);
-  }
-
   return {
-    settings: {
-      people,
-      daysPerPerson
-    },
-    schedules: data.schedules
+    overrides: data.overrides,
+    cachedHolidays: data.cachedHolidays && typeof data.cachedHolidays === "object" ? data.cachedHolidays : {}
   };
 }
 
 async function importCalendarData(file) {
+  const importFileInput = document.getElementById("importFileInput");
   if (!file) return;
 
   try {
@@ -730,18 +573,27 @@ async function importCalendarData(file) {
     const imported = validateImportedData(parsed);
 
     const confirmed = window.confirm(
-      "Import this calendar backup? This will replace the schedules and settings currently saved in this browser."
+      "Import this calendar backup? This will replace your holiday overrides and cached holiday data."
     );
-
     if (!confirmed) return;
 
-    settings = imported.settings;
-    schedules = imported.schedules;
+    holidayOverrides = imported.overrides;
+    saveHolidayOverridesState();
 
-    saveSettingsState();
-    saveSchedulesState();
+    if (imported.cachedHolidays) {
+      for (const [year, list] of Object.entries(imported.cachedHolidays)) {
+        if (Array.isArray(list)) {
+          holidaysCache[year] = list;
+          if (typeof window !== "undefined" && window.localStorage) {
+            window.localStorage.setItem(`${STORAGE_HOLIDAYS_PREFIX}${year}`, JSON.stringify({ timestamp: Date.now(), holidays: list }));
+          }
+        }
+      }
+    }
+
     renderCalendar();
-    showToast("Calendar data imported.");
+    renderOverridesList();
+    showToast("Calendar backup imported successfully.");
   } catch (error) {
     showToast(`Import failed: ${error.message}`, true);
   } finally {
@@ -750,6 +602,7 @@ async function importCalendarData(file) {
 }
 
 function showToast(message, error = false) {
+  const toast = document.getElementById("toast");
   if (!toast) return;
   toast.textContent = message;
   toast.classList.toggle("error", error);
@@ -770,65 +623,93 @@ function escapeHtml(value) {
     .replaceAll("'", "&#039;");
 }
 
+function cleanupLegacyStorage() {
+  if (typeof window === "undefined" || !window.localStorage) return;
+  try {
+    window.localStorage.removeItem("remoteCalendarSchedulesV1");
+  } catch {}
+}
+
+async function initApp() {
+  cleanupLegacyStorage();
+  const year = currentDate.getFullYear();
+  getAllEffectiveHolidays(year);
+  renderCalendar();
+  await syncHolidays(year);
+}
+
 if (typeof document !== "undefined") {
   document.getElementById("prevMonthBtn").addEventListener("click", () => {
     currentDate.setMonth(currentDate.getMonth() - 1);
     renderCalendar();
+    syncHolidays(currentDate.getFullYear());
   });
 
   document.getElementById("nextMonthBtn").addEventListener("click", () => {
     currentDate.setMonth(currentDate.getMonth() + 1);
     renderCalendar();
+    syncHolidays(currentDate.getFullYear());
   });
 
   document.getElementById("todayBtn").addEventListener("click", () => {
     const now = new Date();
     currentDate = new Date(now.getFullYear(), now.getMonth(), 1);
     renderCalendar();
+    syncHolidays(currentDate.getFullYear());
   });
 
-  document.getElementById("regenerateBtn").addEventListener("click", regenerateCurrentMonth);
   document.getElementById("exportBtn").addEventListener("click", exportCalendarData);
-  document.getElementById("importBtn").addEventListener("click", () => importFileInput.click());
-  importFileInput.addEventListener("change", event => importCalendarData(event.target.files[0]));
+  document.getElementById("importBtn").addEventListener("click", () => {
+    const input = document.getElementById("importFileInput");
+    if (input) input.click();
+  });
+
+  const importFileInput = document.getElementById("importFileInput");
+  if (importFileInput) {
+    importFileInput.addEventListener("change", event => importCalendarData(event.target.files[0]));
+  }
+
   document.getElementById("settingsBtn").addEventListener("click", openSettings);
   document.getElementById("closeSettingsBtn").addEventListener("click", closeSettings);
   document.getElementById("cancelSettingsBtn").addEventListener("click", closeSettings);
-  document.getElementById("saveSettingsBtn").addEventListener("click", saveSettingsFromModal);
-  document.getElementById("addPersonBtn").addEventListener("click", addPerson);
+  document.getElementById("addOverrideBtn").addEventListener("click", addOverride);
 
-  settingsModal.addEventListener("click", event => {
-    if (event.target === settingsModal) {
-      closeSettings();
+  document.getElementById("refreshHolidaysBtn").addEventListener("click", async () => {
+    const year = currentDate.getFullYear();
+    if (typeof window !== "undefined" && window.localStorage) {
+      window.localStorage.removeItem(`${STORAGE_HOLIDAYS_PREFIX}${year}`);
     }
+    delete holidaysCache[year];
+    await syncHolidays(year);
+    showToast("Holiday data refreshed.");
   });
+
+  const settingsModal = document.getElementById("settingsModal");
+  if (settingsModal) {
+    settingsModal.addEventListener("click", event => {
+      if (event.target === settingsModal) closeSettings();
+    });
+  }
 
   document.addEventListener("keydown", event => {
-    if (event.key === "Escape") {
-      closeSettings();
-    }
+    if (event.key === "Escape") closeSettings();
   });
 
-  const migrated = migrateExistingSchedules();
-  renderCalendar();
-  if (migrated) {
-    showToast("Some saved schedules were regenerated to match the updated scheduling rules.");
-  }
+  initApp();
 }
 
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
+    ROTATION_ORDER,
+    ANCHOR_DATE,
     isoDate,
     toMondayIndex,
     getWeekKey,
     getPreviousWeekKey,
     getNextWeekKey,
-    getEligibleDates,
-    monthKey,
-    getExternalWeekAssignments,
-    calculateFairness,
-    solveSchedule,
-    validateSchedulesGlobal,
-    migrateExistingSchedules
+    getEffectiveHolidays,
+    getStaticHolidays,
+    computeSchedule,
+    validateImportedData
   };
 }

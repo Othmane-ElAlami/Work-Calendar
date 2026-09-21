@@ -12,17 +12,18 @@
   <div class="topbar">
     <div class="title-wrap">
       <h1>Remote days calendar</h1>
-      <p>Balanced monthly remote-day rotation with editable rules.</p>
+      <p>Continuous static rotation across Tuesday, Wednesday, and Thursday.</p>
     </div>
     <div class="actions">
       <button class="btn" id="todayBtn">Today</button>
       <button class="btn" id="exportBtn">Export</button>
       <button class="btn" id="importBtn">Import</button>
       <button class="btn" id="settingsBtn">Settings</button>
-      <button class="btn primary" id="regenerateBtn">Randomize month</button>
       <input id="importFileInput" type="file" accept=".json,application/json" hidden>
     </div>
   </div>
+
+  <div id="warningBanner" class="warning-banner" style="display: none;"></div>
 
   <div class="toolbar">
     <div class="month-nav">
@@ -52,32 +53,40 @@
 <div class="modal-backdrop" id="settingsModal">
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
     <div class="modal-header">
-      <h2 id="settingsTitle">Settings</h2>
+      <h2 id="settingsTitle">Settings & Rotation</h2>
       <button class="btn" id="closeSettingsBtn">Close</button>
     </div>
     <div class="modal-body">
-      <div class="settings-grid">
-        <div class="field full">
-          <label for="daysPerPersonInput">Monthly target remote days / person</label>
-          <input class="input" id="daysPerPersonInput" type="number" min="1" max="20" value="2">
-        </div>
+      <div class="settings-card">
+        <span class="section-label">Rotation sequence</span>
+        <div class="rotation-meta" id="rotationMeta"></div>
+        <ol class="rotation-list" id="rotationList"></ol>
+      </div>
 
-        <div class="field full">
-          <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
-            <span class="section-label">People</span>
-            <button class="btn" id="addPersonBtn">Add person</button>
-          </div>
-          <div class="people-editor" id="peopleEditor"></div>
+      <div class="settings-card">
+        <span class="section-label">Moroccan public holidays & overrides</span>
+        <div class="rotation-meta">Holidays automatically skip remote work without consuming a person's turn.</div>
+        <div class="override-form">
+          <input class="input" id="overrideDateInput" type="date">
+          <input class="input" id="overrideNameInput" type="text" placeholder="Holiday name">
+          <select class="input" id="overrideTypeSelect">
+            <option value="holiday">Holiday (Skip)</option>
+            <option value="working">Workday (Override)</option>
+          </select>
+          <button class="btn primary" id="addOverrideBtn">Add</button>
+        </div>
+        <div class="override-list" id="overrideList"></div>
+        <div style="margin-top: 12px; display: flex; justify-content: flex-end;">
+          <button class="btn" id="refreshHolidaysBtn">Refresh holiday data</button>
         </div>
       </div>
 
       <div class="settings-note">
-        Remote work is scheduled exclusively on Tuesday, Wednesday, and Thursday with at most one person per day. Each person receives up to the monthly target (max 1 day per calendar week, with no consecutive remote weeks). Long-term fairness prioritizes employees who received fewer days in previous months.
+        Remote work is scheduled continuously strictly on Tuesday, Wednesday, and Thursday with at most one person per day. The sequence never resets across weeks, months, or years. Moroccan public holidays are skipped, shifting that employee to the next available remote day.
       </div>
     </div>
     <div class="modal-footer">
-      <button class="btn" id="cancelSettingsBtn">Cancel</button>
-      <button class="btn primary" id="saveSettingsBtn">Save settings</button>
+      <button class="btn" id="cancelSettingsBtn">Close</button>
     </div>
   </div>
 </div>
