@@ -247,6 +247,29 @@ button {
   border-color: rgba(255, 180, 95, 0.25);
 }
 
+.day.disabled.holiday {
+  background:
+    linear-gradient(135deg, rgba(255, 180, 95, 0.04), rgba(255, 180, 95, 0.015)),
+    #0e0e16;
+  border-color: rgba(255, 180, 95, 0.2);
+}
+
+.day.disabled.weekend {
+  background: #0b0b12;
+}
+
+.day.disabled.weekend.holiday {
+  background:
+    linear-gradient(135deg, rgba(255, 180, 95, 0.035), rgba(255, 180, 95, 0.01)),
+    #0b0b12;
+  border-color: rgba(255, 180, 95, 0.16);
+}
+
+.day.disabled .holiday-chip {
+  background: rgba(255, 180, 95, 0.07);
+  border-color: rgba(255, 180, 95, 0.22);
+}
+
 .day.today {
   box-shadow: inset 0 0 0 1px rgba(169, 112, 255, 0.65);
 }

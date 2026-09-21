@@ -174,4 +174,110 @@ runTest("Test 10: Holiday manual overrides", () => {
   if (effectiveWithOverride["2026-11-18"]) throw new Error("Workday override failed to unmark holiday");
 });
 
+runTest("Test 11: Monday holiday is displayed but does not affect rotation", () => {
+  const base = computeSchedule("2026-10-15", ROTATION_ORDER, ANCHOR_DATE, {});
+  const mondayHoliday = { "2026-09-28": "Green March" };
+  const res = computeSchedule("2026-10-15", ROTATION_ORDER, ANCHOR_DATE, mondayHoliday);
+
+  if (res.holidays["2026-09-28"] !== "Green March") throw new Error("Monday holiday not present in holidays map");
+  if (res.assignments["2026-09-28"]) throw new Error("Monday should not have a remote assignment");
+
+  for (const [date, person] of Object.entries(base.assignments)) {
+    if (res.assignments[date] !== person) {
+      throw new Error(`Rotation affected on ${date}: expected ${person}, got ${res.assignments[date]}`);
+    }
+  }
+});
+
+runTest("Test 12: Friday holiday is displayed but does not affect rotation", () => {
+  const base = computeSchedule("2026-10-15", ROTATION_ORDER, ANCHOR_DATE, {});
+  const fridayHoliday = { "2026-09-25": "Friday Test Holiday" };
+  const res = computeSchedule("2026-10-15", ROTATION_ORDER, ANCHOR_DATE, fridayHoliday);
+
+  if (res.holidays["2026-09-25"] !== "Friday Test Holiday") throw new Error("Friday holiday not present in holidays map");
+  if (res.assignments["2026-09-25"]) throw new Error("Friday should not have a remote assignment");
+
+  for (const [date, person] of Object.entries(base.assignments)) {
+    if (res.assignments[date] !== person) {
+      throw new Error(`Rotation affected on ${date}: expected ${person}, got ${res.assignments[date]}`);
+    }
+  }
+});
+
+runTest("Test 13: Saturday holiday is displayed but does not affect rotation", () => {
+  const base = computeSchedule("2026-10-15", ROTATION_ORDER, ANCHOR_DATE, {});
+  const satHoliday = { "2026-09-26": "Saturday Test Holiday" };
+  const res = computeSchedule("2026-10-15", ROTATION_ORDER, ANCHOR_DATE, satHoliday);
+
+  if (res.holidays["2026-09-26"] !== "Saturday Test Holiday") throw new Error("Saturday holiday not present in holidays map");
+  if (res.assignments["2026-09-26"]) throw new Error("Saturday should not have a remote assignment");
+
+  for (const [date, person] of Object.entries(base.assignments)) {
+    if (res.assignments[date] !== person) {
+      throw new Error(`Rotation affected on ${date}: expected ${person}, got ${res.assignments[date]}`);
+    }
+  }
+});
+
+runTest("Test 14: Sunday holiday is displayed but does not affect rotation", () => {
+  const base = computeSchedule("2026-10-15", ROTATION_ORDER, ANCHOR_DATE, {});
+  const sunHoliday = { "2026-09-27": "Sunday Test Holiday" };
+  const res = computeSchedule("2026-10-15", ROTATION_ORDER, ANCHOR_DATE, sunHoliday);
+
+  if (res.holidays["2026-09-27"] !== "Sunday Test Holiday") throw new Error("Sunday holiday not present in holidays map");
+  if (res.assignments["2026-09-27"]) throw new Error("Sunday should not have a remote assignment");
+
+  for (const [date, person] of Object.entries(base.assignments)) {
+    if (res.assignments[date] !== person) {
+      throw new Error(`Rotation affected on ${date}: expected ${person}, got ${res.assignments[date]}`);
+    }
+  }
+});
+
+runTest("Test 15: Tuesday holiday is displayed and skips the assignment", () => {
+  const tueHoliday = { "2026-09-22": "Tuesday Holiday" };
+  const res = computeSchedule("2026-10-15", ROTATION_ORDER, ANCHOR_DATE, tueHoliday);
+
+  if (res.holidays["2026-09-22"] !== "Tuesday Holiday") throw new Error("Tuesday holiday not present in holidays map");
+  if (res.assignments["2026-09-22"]) throw new Error("Tuesday should have skipped remote assignment");
+});
+
+runTest("Test 16: Wednesday holiday is displayed and skips the assignment", () => {
+  const wedHoliday = { "2026-09-23": "Wednesday Holiday" };
+  const res = computeSchedule("2026-10-15", ROTATION_ORDER, ANCHOR_DATE, wedHoliday);
+
+  if (res.holidays["2026-09-23"] !== "Wednesday Holiday") throw new Error("Wednesday holiday not present in holidays map");
+  if (res.assignments["2026-09-23"]) throw new Error("Wednesday should have skipped remote assignment");
+});
+
+runTest("Test 17: Thursday holiday is displayed and skips the assignment", () => {
+  const thuHoliday = { "2026-09-24": "Thursday Holiday" };
+  const res = computeSchedule("2026-10-15", ROTATION_ORDER, ANCHOR_DATE, thuHoliday);
+
+  if (res.holidays["2026-09-24"] !== "Thursday Holiday") throw new Error("Thursday holiday not present in holidays map");
+  if (res.assignments["2026-09-24"]) throw new Error("Thursday should have skipped remote assignment");
+});
+
+runTest("Test 18: Next eligible date receives the same person after Tue/Wed/Thu holiday", () => {
+  const base = computeSchedule("2026-10-15", ROTATION_ORDER, ANCHOR_DATE, {});
+
+  const baseTuePerson = base.assignments["2026-09-22"];
+  const resTue = computeSchedule("2026-10-15", ROTATION_ORDER, ANCHOR_DATE, { "2026-09-22": "Tue Holiday" });
+  if (resTue.assignments["2026-09-23"] !== baseTuePerson) {
+    throw new Error(`Expected Wednesday to receive ${baseTuePerson} after Tuesday holiday, got ${resTue.assignments["2026-09-23"]}`);
+  }
+
+  const baseWedPerson = base.assignments["2026-09-23"];
+  const resWed = computeSchedule("2026-10-15", ROTATION_ORDER, ANCHOR_DATE, { "2026-09-23": "Wed Holiday" });
+  if (resWed.assignments["2026-09-24"] !== baseWedPerson) {
+    throw new Error(`Expected Thursday to receive ${baseWedPerson} after Wednesday holiday, got ${resWed.assignments["2026-09-24"]}`);
+  }
+
+  const baseThuPerson = base.assignments["2026-09-24"];
+  const resThu = computeSchedule("2026-10-15", ROTATION_ORDER, ANCHOR_DATE, { "2026-09-24": "Thu Holiday" });
+  if (resThu.assignments["2026-09-29"] !== baseThuPerson) {
+    throw new Error(`Expected next Tuesday to receive ${baseThuPerson} after Thursday holiday, got ${resThu.assignments["2026-09-29"]}`);
+  }
+});
+
 console.log(`\nAll ${passedCount} tests passed successfully.`);

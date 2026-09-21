@@ -226,6 +226,23 @@ function updateWarningBanner(show) {
   }
 }
 
+function renderSummary(assignmentsInMonth, holidaysInMonth) {
+  const summary = document.getElementById("summary");
+  if (!summary) return;
+  const remoteCount = Object.keys(assignmentsInMonth).length;
+  const holidayCount = Object.keys(holidaysInMonth).length;
+
+  let html = `
+    <div class="summary-pill">${ROTATION_ORDER.length} people</div>
+    <div class="summary-pill">Rotation anchor: Sep 21, 2026</div>
+    <div class="summary-pill">${remoteCount} remote days this month</div>
+  `;
+  if (holidayCount > 0) {
+    html += `<div class="summary-pill">${holidayCount} public holiday${holidayCount > 1 ? "s" : ""}</div>`;
+  }
+  summary.innerHTML = html;
+}
+
 function computeSchedule(endDateIso, rotationOrder = ROTATION_ORDER, anchorDate = ANCHOR_DATE, effectiveHolidaysMap = {}) {
   const [ay, am, ad] = anchorDate.split("-").map(Number);
   const [ey, em, ed] = endDateIso.split("-").map(Number);
@@ -237,6 +254,10 @@ function computeSchedule(endDateIso, rotationOrder = ROTATION_ORDER, anchorDate 
   const assignments = {};
   const holidays = {};
 
+  for (const [dateStr, name] of Object.entries(effectiveHolidaysMap)) {
+    holidays[dateStr] = name;
+  }
+
   while (cur <= end) {
     const y = cur.getFullYear();
     const m = cur.getMonth();
@@ -244,10 +265,12 @@ function computeSchedule(endDateIso, rotationOrder = ROTATION_ORDER, anchorDate 
     const dateStr = isoDate(y, m, d);
     const wd = toMondayIndex(cur.getDay());
 
+    if (effectiveHolidaysMap[dateStr]) {
+      holidays[dateStr] = effectiveHolidaysMap[dateStr];
+    }
+
     if (wd >= 2 && wd <= 4) {
-      if (effectiveHolidaysMap[dateStr]) {
-        holidays[dateStr] = effectiveHolidaysMap[dateStr];
-      } else {
+      if (!effectiveHolidaysMap[dateStr]) {
         assignments[dateStr] = rotationOrder[rotationIndex % rotationOrder.length];
         rotationIndex++;
       }
@@ -282,23 +305,6 @@ function renderLegend(assignmentsInMonth) {
     item.innerHTML = `<span class="legend-dot" style="background:${personColor(person)}"></span><span>${escapeHtml(person)} (${count})</span>`;
     legend.appendChild(item);
   });
-}
-
-function renderSummary(assignmentsInMonth, holidaysInMonth) {
-  const summary = document.getElementById("summary");
-  if (!summary) return;
-  const remoteCount = Object.keys(assignmentsInMonth).length;
-  const holidayCount = Object.keys(holidaysInMonth).length;
-
-  let html = `
-    <div class="summary-pill">${ROTATION_ORDER.length} people</div>
-    <div class="summary-pill">Rotation anchor: Sep 21, 2026</div>
-    <div class="summary-pill">${remoteCount} remote days this month</div>
-  `;
-  if (holidayCount > 0) {
-    html += `<div class="summary-pill">${holidayCount} holiday${holidayCount > 1 ? "s" : ""} skipped</div>`;
-  }
-  summary.innerHTML = html;
 }
 
 function renderCalendar() {
@@ -358,34 +364,20 @@ function renderCalendar() {
     const weekday = toMondayIndex(date.getDay());
     const dateIso = isoDate(year, month, dayNumber);
     const isAllowedWeekday = weekday >= 2 && weekday <= 4;
+    const isWeekend = weekday === 6 || weekday === 7;
     const isBeforeAnchor = dateIso < ANCHOR_DATE;
-    const holidayName = scheduleData.holidays[dateIso];
+    const holidayName = scheduleData.holidays[dateIso] || effective[dateIso];
     const assignedPerson = scheduleData.assignments[dateIso];
 
     let dayClass = "day";
     if (dateIso === todayIso) dayClass += " today";
+    if (!isAllowedWeekday) dayClass += " disabled";
+    if (isWeekend) dayClass += " weekend";
+    if (holidayName) dayClass += " holiday";
 
-    if (!isAllowedWeekday) {
-      dayClass += " disabled";
-      dayEl.className = dayClass;
-      dayEl.innerHTML = `
-        <div class="day-number">
-          <span class="num">${dayNumber}</span>
-          <span class="day-state">Office</span>
-        </div>
-      `;
-    } else if (isBeforeAnchor) {
-      dayClass += " disabled";
-      dayEl.className = dayClass;
-      dayEl.innerHTML = `
-        <div class="day-number">
-          <span class="num">${dayNumber}</span>
-          <span class="day-state">Pre-rotation</span>
-        </div>
-      `;
-    } else if (holidayName) {
-      dayClass += " holiday";
-      dayEl.className = dayClass;
+    dayEl.className = dayClass;
+
+    if (holidayName) {
       dayEl.innerHTML = `
         <div class="day-number">
           <span class="num">${dayNumber}</span>
@@ -397,8 +389,22 @@ function renderCalendar() {
           </div>
         </div>
       `;
+    } else if (!isAllowedWeekday) {
+      const stateText = isWeekend ? "Weekend" : "Office";
+      dayEl.innerHTML = `
+        <div class="day-number">
+          <span class="num">${dayNumber}</span>
+          <span class="day-state">${stateText}</span>
+        </div>
+      `;
+    } else if (isBeforeAnchor) {
+      dayEl.innerHTML = `
+        <div class="day-number">
+          <span class="num">${dayNumber}</span>
+          <span class="day-state">Pre-rotation</span>
+        </div>
+      `;
     } else if (assignedPerson) {
-      dayEl.className = dayClass;
       dayEl.innerHTML = `
         <div class="day-number">
           <span class="num">${dayNumber}</span>
@@ -412,7 +418,6 @@ function renderCalendar() {
         </div>
       `;
     } else {
-      dayEl.className = dayClass;
       dayEl.innerHTML = `
         <div class="day-number">
           <span class="num">${dayNumber}</span>

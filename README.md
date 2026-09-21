@@ -22,12 +22,13 @@ The scheduling system is based on a single continuous permutation of the seven t
 4. **Capacity**: At most **1 person** is scheduled per day (never multiple people on the same date).
 5. **Continuous Unbroken Timeline**: The rotation order never resets across weeks, months, or years. It flows continuously across month and year boundaries.
 6. **No Consecutive Remote Weeks**: Because there are 7 people and at most 3 remote slots per week, no employee ever appears in consecutive calendar weeks.
-7. **Moroccan Public Holidays**:
-   - Moroccan public holidays are dynamically retrieved from the public holiday API (`https://date.nager.at/api/v3/PublicHolidays/{year}/MA`) and cached locally in `localStorage` per year.
-   - Holidays falling on Tuesday, Wednesday, or Thursday are skipped for remote work.
-   - An employee whose turn coincides with a holiday is shifted to the very next available remote day without losing their turn.
-   - An offline fallback is maintained for static Moroccan national holidays. A warning banner alerts users if the remote holiday service is unreachable.
-8. **Manual Holiday Overrides**:
+7. **Holiday Display vs. Rotation Effect**:
+   - **Display (All 7 Weekdays)**: Moroccan public holidays are displayed on every day of the week (Monday through Sunday). Each holiday date shows holiday styling and a badge with the holiday name. Non-eligible weekdays (Mon/Fri) retain their non-remote appearance with the holiday indicator, and weekend cells (Sat/Sun) retain their weekend appearance without looking like remote-work days.
+   - **Rotation Effect (Tue/Wed/Thu Only)**: Only holidays falling on eligible remote-work days (Tuesday, Wednesday, Thursday) affect the rotation schedule. On those dates, no person is assigned, the rotation does not advance, and the scheduled person is shifted to the very next available eligible date. Holidays falling on Monday, Friday, Saturday, or Sunday have zero effect on the rotation.
+8. **Public Holiday Sources & Fallback Hierarchy**:
+   - Retrieved dynamically from Nager.Date API (`https://date.nager.at/api/v3/PublicHolidays/{year}/MA`) and cached locally in `localStorage` per year.
+   - An offline fallback is maintained for static Moroccan national holidays. An alert banner appears if the remote holiday service is unreachable and no cache exists.
+9. **Manual Holiday Overrides**:
    - Custom overrides can be added or removed through the Settings modal.
    - Users can designate custom holidays (skipping remote work) or custom workday overrides.
    - Overrides persist in `localStorage` (`remoteCalendarHolidayOverridesV2`).
@@ -40,13 +41,13 @@ The scheduling system is based on a single continuous permutation of the seven t
 
 ## Verification & Automated Tests
 
-A dedicated test suite verifies all 10 core scheduler requirements:
+A dedicated test suite verifies all core scheduler and holiday display/rotation requirements:
 
 ```bash
 node tests/scheduler.test.js
 ```
 
-### Test Coverage
+### Test Coverage (18 Tests)
 
 1. **Rotation Order Preservation**: Cycles through all 7 members in order across repeated rounds.
 2. **Month Boundary Continuity**: Seamless transition from September to October without resetting.
@@ -58,6 +59,14 @@ node tests/scheduler.test.js
 8. **Deterministic Generation**: Verifies identical inputs always produce identical schedules.
 9. **API Outage Fallback**: Validates cache lookup, static holiday fallback, and outage warning flag handling.
 10. **Holiday Manual Overrides**: Validates custom holiday addition, turning off public holidays as workdays, and queue shift retention.
+11. **Monday Holiday Display & Isolation**: Monday holiday is displayed but does not affect rotation.
+12. **Friday Holiday Display & Isolation**: Friday holiday is displayed but does not affect rotation.
+13. **Saturday Holiday Display & Isolation**: Saturday holiday is displayed but does not affect rotation.
+14. **Sunday Holiday Display & Isolation**: Sunday holiday is displayed but does not affect rotation.
+15. **Tuesday Holiday Display & Skip**: Tuesday holiday is displayed and skips remote assignment.
+16. **Wednesday Holiday Display & Skip**: Wednesday holiday is displayed and skips remote assignment.
+17. **Thursday Holiday Display & Skip**: Thursday holiday is displayed and skips remote assignment.
+18. **Turn Retention**: After a Tue/Wed/Thu holiday, the next eligible date receives the same person who would have received the holiday date.
 
 ## Project Structure
 
