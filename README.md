@@ -1,26 +1,22 @@
 # Work Calendar
 
-A lightweight browser-based work calendar for generating and managing randomized remote-work schedules. The project is intentionally general enough to support additional workplace scheduling features in the future.
+A lightweight browser-based work calendar for generating and managing remote-work schedules following a balanced, constraint-aware rotation policy.
 
-## Features
+## Scheduling Rules
 
-- Monthly calendar interface
-- Configurable employee list
-- Configurable remote days per person per month
-- Randomized monthly scheduling
-- Maximum one remote day per person per calendar week
-- Configurable maximum people per remote day
-- Configurable maximum distinct remote workers per week
-- Configurable allowed weekdays
-- Tuesday, Wednesday, and Thursday are prioritized
-- Monday and Friday act as fallback days when enabled and preferred slots are unavailable
-- Existing monthly schedules persist using localStorage
-- Settings persist using localStorage
-- Individual months can be randomized again
-- Calendar data can be exported to JSON
-- Calendar data can be imported from JSON
-- Responsive dark-mode interface
-- No backend or database required
+The calendar enforces the following hard constraints:
+
+1. **Allowed Weekdays**: Remote work is permitted exclusively on **Tuesday**, **Wednesday**, and **Thursday**. Monday and Friday are strictly office days.
+2. **One Remote Worker per Day**: Each eligible day contains at most **1 remote worker** (never multiple people on the same date).
+3. **Weekly Limit**: Each person may receive at most **1 remote day per calendar week** (Monday through Sunday).
+4. **No Consecutive Remote Weeks**: A person assigned in calendar week $W$ cannot be assigned in week $W - 1$ or week $W + 1$. There must always be at least one full calendar week without remote work between assignments.
+5. **Cross-Month Week Handling**: Calendar weeks spanning month boundaries (and year boundaries) are treated globally. Assignments in adjacent months are preserved as fixed constraints when generating or regenerating any month.
+
+## Monthly Target & Long-Term Fairness
+
+- **Monthly Target**: Up to **2 remote days per person per month** (configurable in Settings).
+- **Scarcity Distribution**: In months where total calendar capacity (number of Tue/Wed/Thu dates) cannot provide everyone with 2 days without violating hard constraints, the scheduler generates the maximum feasible valid assignments rather than failing.
+- **Long-Term Fairness**: The scheduler calculates cumulative fairness debt from persisted history (`fairnessDebt = targetCumulative - actualCumulative`). Employees who received fewer days in previous months automatically receive higher priority in subsequent months.
 
 ## Default Team
 
@@ -32,33 +28,22 @@ A lightweight browser-based work calendar for generating and managing randomized
 - Hamza
 - Yassine
 
-The list can be changed from Settings.
+The employee list and monthly target can be adjusted in Settings.
 
-## Default Scheduling Rules
+## Persistence & Data Management
 
-Each person is assigned **3 remote days per month**, with a maximum of **1 remote day per person per calendar week**. Not every person is necessarily scheduled every week.
-
-**Tuesday**, **Wednesday**, and **Thursday** are the preferred days. **Monday** and **Friday** are excluded by default. If Monday or Friday are manually enabled in Settings, they are used only as fallback days when the preferred slots are unavailable.
-
-Other limits — such as the maximum number of people per remote day and the maximum number of distinct remote workers per week — are configurable through Settings.
-
-## Persistence
-
-Schedules and settings are stored using browser **localStorage**.
-
-- Refreshing or reopening the site in the same browser preserves schedules.
-- Different browsers or devices have independent localStorage and will not share data.
-- Use **Export** / **Import** to move or back up calendar data across browsers or devices.
-- GitHub Pages itself does not provide shared server-side persistence.
+- Schedules and settings persist across browser sessions using **localStorage**.
+- **Export**: Creates a timestamped JSON backup containing settings and all saved monthly schedules.
+- **Import**: Restores a calendar backup after validating all global and cross-month hard constraints.
+- When existing saved schedules violate updated policies, a controlled migration recalculates affected months.
 
 ## Usage
 
-1. Open the [GitHub Pages website](https://othmane-elalami.github.io/Work-Calendar/).
-2. Adjust **Settings** if necessary (team members, remote days, allowed weekdays).
-3. Generate or randomize the current month.
+1. Open the [Work Calendar website](https://othmane-elalami.github.io/Work-Calendar/).
+2. Adjust team members or monthly targets in **Settings** if needed.
+3. Click **Randomize month** to generate or reshuffle the current month.
 4. Navigate between months using the arrow buttons.
-5. Export a backup if desired.
-6. Import a previous backup when needed.
+5. Use **Export** to create a backup or **Import** to load a backup JSON file.
 
 ## Project Structure
 
@@ -71,19 +56,13 @@ Work-Calendar/
 │   └── app.js
 ├── assets/
 │   └── favicon.svg
+├── tests/
+│   └── scheduler.test.js
 └── README.md
 ```
 
 ## Hosting
 
-The project is hosted using **GitHub Pages** from the `master` branch, root directory (`/`).
+Hosted on **GitHub Pages** from the `master` branch root directory (`/`).
 
 **Live site:** https://othmane-elalami.github.io/Work-Calendar/
-
-## Tech
-
-- HTML5
-- CSS3
-- Vanilla JavaScript
-- localStorage
-- GitHub Pages

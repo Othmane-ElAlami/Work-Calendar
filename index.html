@@ -57,24 +57,9 @@
     </div>
     <div class="modal-body">
       <div class="settings-grid">
-        <div class="field">
-          <label for="daysPerPersonInput">Remote days per person / month</label>
-          <input class="input" id="daysPerPersonInput" type="number" min="1" max="20">
-        </div>
-
-        <div class="field">
-          <label for="maxPerDayInput">Maximum people per remote day</label>
-          <input class="input" id="maxPerDayInput" type="number" min="1" max="20">
-        </div>
-
-        <div class="field">
-          <label for="maxPeoplePerWeekInput">Maximum distinct people per week</label>
-          <input class="input" id="maxPeoplePerWeekInput" type="number" min="1" max="20">
-        </div>
-
         <div class="field full">
-          <span class="section-label">Allowed weekdays</span>
-          <div class="weekday-options" id="weekdayOptions"></div>
+          <label for="daysPerPersonInput">Monthly target remote days / person</label>
+          <input class="input" id="daysPerPersonInput" type="number" min="1" max="20" value="2">
         </div>
 
         <div class="field full">
@@ -87,7 +72,7 @@
       </div>
 
       <div class="settings-note">
-        Saving settings clears stored schedules and generates a fresh schedule. Each person can receive at most one remote day per calendar week. Tuesday, Wednesday, and Thursday are always preferred; if Monday or Friday are enabled, they are used only as fallback days when preferred slots are unavailable.
+        Remote work is scheduled exclusively on Tuesday, Wednesday, and Thursday with at most one person per day. Each person receives up to the monthly target (max 1 day per calendar week, with no consecutive remote weeks). Long-term fairness prioritizes employees who received fewer days in previous months.
       </div>
     </div>
     <div class="modal-footer">
